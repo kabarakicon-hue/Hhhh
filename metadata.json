@@ -1,0 +1,6 @@
+{
+  "name": "SMS Gateway",
+  "description": "Enterprise SMS Gateway app for Android that routes SMS to and from your server via API",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

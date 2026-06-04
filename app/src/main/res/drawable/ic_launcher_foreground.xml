@@ -1,0 +1,22 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Glowing accent ring around the center -->
+    <path
+        android:fillColor="#1005E599"
+        android:pathData="M 54 54 m -36 0 a 36 36 0 1 0 72 0 a 36 36 0 1 0 -72 0" />
+
+    <!-- Emerald filled transmission background disk -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M 54 54 m -26 0 a 26 26 0 1 0 52 0 a 26 26 0 1 0 -52 0" />
+
+    <!-- Pure white transmission caret pointing up-right -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48.5,41.5 L64.5,47.5 L53.5,58.5 L48.5,41.5 M52.5,52.5 L63.5,48.5 L53.5,58.5 Z" />
+
+</vector>
