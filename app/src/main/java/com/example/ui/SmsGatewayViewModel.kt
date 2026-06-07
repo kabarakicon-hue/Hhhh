@@ -126,11 +126,6 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
     fun refreshSecurityAudit() {
         val report = SecurityUtils.performSecurityAudit(context)
         _securityReport.value = report
-        
-        // Enforce immediate self defense exit if any threat is detected & enforcer mode is active
-        if (report.hasAnyThreat() && authManager.isSelfDefenseModeEnabled()) {
-            SecurityUtils.activateDefenseEnforcer()
-        }
     }
 
     fun toggleAntiScreenshot(enabled: Boolean) {

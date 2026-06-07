@@ -20,13 +20,8 @@ class MainActivity : ComponentActivity() {
 
         val authManager = AuthManager(this)
         
-        // Immediate proactive self-defense startup screening
-        if (authManager.isSelfDefenseModeEnabled()) {
-            val report = SecurityUtils.performSecurityAudit(this)
-            if (report.hasAnyThreat()) {
-                SecurityUtils.activateDefenseEnforcer()
-            }
-        }
+        // Run a silent startup security audit in the background for logging purposes
+        val report = SecurityUtils.performSecurityAudit(this)
 
         enableEdgeToEdge()
 

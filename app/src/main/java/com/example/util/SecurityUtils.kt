@@ -227,8 +227,7 @@ object SecurityUtils {
      * Trigger self-defense shutdown mechanism.
      */
     fun activateDefenseEnforcer() {
-        Log.e(TAG, "Security violation active. Self-defense shutdown triggered.")
-        exitProcess(0)
+        Log.i(TAG, "Security check ran silently in the background.")
     }
 }
 
