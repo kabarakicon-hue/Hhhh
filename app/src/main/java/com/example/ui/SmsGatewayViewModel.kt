@@ -20,6 +20,7 @@ import com.example.data.pref.AuthManager
 import com.example.service.GatewayService
 import com.example.util.SecurityUtils
 import com.example.util.SecurityReport
+import com.example.util.NetworkUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -248,6 +249,15 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // Perform deep network internet probe beforehand to verify payload transmission
+                if (!NetworkUtils.isInternetAvailable(context)) {
+                    withContext(Dispatchers.Main) {
+                        _isConnecting.value = false
+                        _connectionError.value = "No active internet connection. Please verify your mobile data or WiFi has active internet access."
+                    }
+                    return@launch
+                }
+
                 Log.d("ViewModel", "Requesting connect payload at URL: $apiUrl ...")
                 // Save credentials beforehand so getService(context) can use the dynamic URL
                 authManager.saveCredentials(devId, devToken, apiUrl)
@@ -830,6 +840,9 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
 
     fun isAutoReplyScheduleActive(): Boolean = authManager.isAutoReplyScheduleActive()
     fun setAutoReplyScheduleActive(active: Boolean) = authManager.setAutoReplyScheduleActive(active)
+
+    fun getAutoReplyDelaySeconds(): Int = authManager.getAutoReplyDelaySeconds()
+    fun setAutoReplyDelaySeconds(seconds: Int) = authManager.setAutoReplyDelaySeconds(seconds)
 
     // Stats Retrieval
     fun getAutoReplySentCount(): Int = authManager.getAutoReplySentCount()

@@ -735,6 +735,7 @@ fun DashboardScreen(viewModel: SmsGatewayViewModel, onViewAllHistory: () -> Unit
     val state by viewModel.gatewayState.collectAsStateWithLifecycle()
     val recentLogs by viewModel.filteredHistoryLogs.collectAsStateWithLifecycle(emptyList())
     val activeSims by viewModel.activeSimsList.collectAsStateWithLifecycle()
+    val selectedSimPref by viewModel.selectedSimPref.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     Column(
@@ -1046,9 +1047,19 @@ fun DashboardScreen(viewModel: SmsGatewayViewModel, onViewAllHistory: () -> Unit
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                 }
+                                val isSimSelected = selectedSimPref.startsWith("SIM ${sim.slotIndex + 1}")
                                 Switch(
-                                    checked = sim.isActive,
-                                    onCheckedChange = { /* Dynamic read state helper */ },
+                                    checked = isSimSelected,
+                                    onCheckedChange = { checked ->
+                                        if (checked) {
+                                            val fullName = "SIM ${sim.slotIndex + 1} (${sim.carrierName})"
+                                            viewModel.updateSelectedSimPref(fullName)
+                                            Toast.makeText(context, "$fullName selected for dispatch", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            viewModel.updateSelectedSimPref("Auto")
+                                            Toast.makeText(context, "SIM dispatch set to Auto-select", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = EmeraldPrimary,
                                         checkedTrackColor = Color(0xFF064E3B)

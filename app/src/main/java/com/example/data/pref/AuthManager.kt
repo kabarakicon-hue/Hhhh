@@ -388,9 +388,18 @@ class AuthManager(private val context: Context) {
         sharedPreferences.edit().putBoolean("auto_reply_schedule_active", active).apply()
     }
 
+    // --- AUTO REPLY TIME DELAY ---
+    fun getAutoReplyDelaySeconds(): Int {
+        return sharedPreferences.getInt("auto_reply_delay_seconds", 0)
+    }
+
+    fun setAutoReplyDelaySeconds(seconds: Int) {
+        sharedPreferences.edit().putInt("auto_reply_delay_seconds", seconds).apply()
+    }
+
     // --- AUTO REPLY STATS ENGINE ---
     fun getAutoReplySentCount(): Int {
-        return sharedPreferences.getInt("auto_reply_sent_count", 24)
+        return sharedPreferences.getInt("auto_reply_sent_count", 0)
     }
 
     fun setAutoReplySentCount(count: Int) {
@@ -398,7 +407,7 @@ class AuthManager(private val context: Context) {
     }
 
     fun getAutoReplyUniqueContacts(): String {
-        return sharedPreferences.getString("auto_reply_unique_contacts", "2547111222,2547333444,15550001212") ?: "2547111222,2547333444,15550001212"
+        return sharedPreferences.getString("auto_reply_unique_contacts", "") ?: ""
     }
 
     fun setAutoReplyUniqueContacts(contacts: String) {
@@ -406,7 +415,7 @@ class AuthManager(private val context: Context) {
     }
 
     fun getAutoReplyLastTriggerTime(): Long {
-        return sharedPreferences.getLong("auto_reply_last_trigger_time", System.currentTimeMillis() - 120_000L) // 2m ago default
+        return sharedPreferences.getLong("auto_reply_last_trigger_time", 0L)
     }
 
     fun setAutoReplyLastTriggerTime(time: Long) {
@@ -414,7 +423,7 @@ class AuthManager(private val context: Context) {
     }
 
     fun getAutoReplyMatchRate(): Float {
-        return sharedPreferences.getFloat("auto_reply_match_rate", 92.5f)
+        return sharedPreferences.getFloat("auto_reply_match_rate", 0.0f)
     }
 
     fun setAutoReplyMatchRate(rate: Float) {

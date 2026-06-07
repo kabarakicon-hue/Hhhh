@@ -85,6 +85,11 @@ class AutoReplyNotificationListenerService : NotificationListenerService() {
 
         serviceScope.launch {
             try {
+                val delaySeconds = authManager.getAutoReplyDelaySeconds()
+                if (delaySeconds > 0) {
+                    Log.d("AutoReplyService", "Delaying auto-reply by $delaySeconds seconds...")
+                    delay(delaySeconds * 1000L)
+                }
                 processAndReply(
                     sender = senderTitle,
                     message = messageText,

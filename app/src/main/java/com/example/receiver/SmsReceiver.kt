@@ -15,6 +15,7 @@ import com.example.data.db.SmsEntity
 import com.example.data.db.SmsRepository
 import com.example.data.pref.AuthManager
 import com.example.service.GatewayService
+import com.example.util.NetworkUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -93,18 +94,22 @@ class SmsReceiver : BroadcastReceiver() {
 
                     if (devId != null && devToken != null) {
                         Log.d(TAG, "Forwarding incoming SMS to backend...")
-                        val response = RetrofitClient.getService(context).forwardIncoming(
-                            IncomingSmsRequest(
-                                deviceId = devId,
-                                deviceToken = devToken,
-                                sender = sender,
-                                message = messageBody
-                            )
-                        )
-                        if (response.isSuccessful) {
-                            Log.d(TAG, "Incoming SMS forwarded successfully!")
+                        if (!NetworkUtils.isInternetAvailable(context)) {
+                            Log.w(TAG, "Skipping incoming SMS forward to backend: Offline (no active internet).")
                         } else {
-                            Log.w(TAG, "Failed forwarding SMS. API error code: ${response.code()}")
+                            val response = RetrofitClient.getService(context).forwardIncoming(
+                                IncomingSmsRequest(
+                                    deviceId = devId,
+                                    deviceToken = devToken,
+                                    sender = sender,
+                                    message = messageBody
+                                )
+                            )
+                            if (response.isSuccessful) {
+                                Log.d(TAG, "Incoming SMS forwarded successfully!")
+                            } else {
+                                Log.w(TAG, "Failed forwarding SMS. API error code: ${response.code()}")
+                            }
                         }
                     }
                 }

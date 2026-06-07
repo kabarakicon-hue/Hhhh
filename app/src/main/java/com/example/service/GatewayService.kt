@@ -33,6 +33,7 @@ import com.example.data.db.SmsDatabase
 import com.example.data.db.SmsEntity
 import com.example.data.db.SmsRepository
 import com.example.data.pref.AuthManager
+import com.example.util.NetworkUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -298,6 +299,10 @@ class GatewayService : Service() {
 
         serviceScope.launch(Dispatchers.IO) {
             try {
+                if (!NetworkUtils.isInternetAvailable(this@GatewayService)) {
+                    handleConnectionFailure("No internet / offline")
+                    return@launch
+                }
                 Log.d(TAG, "Connecting to sever for validation...")
                 val response = RetrofitClient.getService(this@GatewayService).connectDevice(ConnectRequest(devId, devToken))
                 if (response.isSuccessful) {
@@ -345,6 +350,17 @@ class GatewayService : Service() {
 
         serviceScope.launch(Dispatchers.IO) {
             try {
+                if (!NetworkUtils.isInternetAvailable(this@GatewayService)) {
+                    Log.w(TAG, "Heartbeat aborted: Offline (no active internet).")
+                    withContext(Dispatchers.Main) {
+                        _serviceState.value = _serviceState.value.copy(
+                            isConnected = false,
+                            connectionMessage = "Offline (no active internet)"
+                        )
+                        updateNotification("Offline (no active internet)")
+                    }
+                    return@launch
+                }
                 Log.d(TAG, "Sending heartbeat to server...")
                 val response = RetrofitClient.getService(this@GatewayService).sendHeartbeat(
                     HeartbeatRequest(devId, devToken, battery, signal)
@@ -375,6 +391,16 @@ class GatewayService : Service() {
 
         serviceScope.launch(Dispatchers.IO) {
             try {
+                if (!NetworkUtils.isInternetAvailable(this@GatewayService)) {
+                    Log.w(TAG, "Polling aborted: Offline (no active internet).")
+                    withContext(Dispatchers.Main) {
+                        _serviceState.value = _serviceState.value.copy(
+                            isConnected = false,
+                            connectionMessage = "Offline"
+                        )
+                    }
+                    return@launch
+                }
                 Log.d(TAG, "Polling jobs...")
                 val response = RetrofitClient.getService(this@GatewayService).pollJobs(PollRequest(devId, devToken))
                 if (response.isSuccessful) {
@@ -530,7 +556,11 @@ class GatewayService : Service() {
 
                 // Report back to central server
                 Log.d(TAG, "Reporting success for job: ${job.jobId}")
-                RetrofitClient.getService(this@GatewayService).reportSent(ReportSentRequest(devId, devToken, job.jobId))
+                if (NetworkUtils.isInternetAvailable(this@GatewayService)) {
+                    RetrofitClient.getService(this@GatewayService).reportSent(ReportSentRequest(devId, devToken, job.jobId))
+                } else {
+                    Log.w(TAG, "Unable to report success for job: ${job.jobId} - Offline (no active internet)")
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error reporting SMS success: ${e.message}")
@@ -559,7 +589,11 @@ class GatewayService : Service() {
 
                 // Report back failing status to API
                 Log.d(TAG, "Reporting failure for job: ${job.jobId}, reason: $reason")
-                RetrofitClient.getService(this@GatewayService).reportFailed(ReportFailedRequest(devId, devToken, job.jobId, reason))
+                if (NetworkUtils.isInternetAvailable(this@GatewayService)) {
+                    RetrofitClient.getService(this@GatewayService).reportFailed(ReportFailedRequest(devId, devToken, job.jobId, reason))
+                } else {
+                    Log.w(TAG, "Unable to report failure for job: ${job.jobId} - Offline (no active internet)")
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error reporting SMS failure: ${e.message}")

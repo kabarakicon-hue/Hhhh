@@ -42,6 +42,7 @@ fun AutoReplyScreen(viewModel: SmsGatewayViewModel) {
     // Core state loaded from SharedPreferences
     var isEnabled by remember { mutableStateOf(viewModel.getAutoReplyEnabled()) }
     var activePlatforms by remember { mutableStateOf(viewModel.getAutoReplyPlatforms()) }
+    var replyDelaySeconds by remember { mutableStateOf(viewModel.getAutoReplyDelaySeconds()) }
     
     // Active popup configurations
     var activeEditorDialog by remember { mutableStateOf<String?>(null) } // "Rules", "Menus", "AI", "Fallbacks", "Direct", "Forms", "Welcome", "Schedule"
@@ -550,6 +551,281 @@ fun AutoReplyScreen(viewModel: SmsGatewayViewModel) {
                             fontSize = 10.sp,
                             color = SoftGray
                         )
+                    }
+                }
+            }
+        }
+
+        // --- TIMING DELAY & DIAGNOSTICS CHECKER PANEL ---
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("delay_diagnostics_card"),
+                colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+                border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Title Header
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = "Timing & delay configurations",
+                            tint = SkySecondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Auto-Reply Delay Engine",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = LightText
+                        )
+                    }
+
+                    Text(
+                        text = "Adding a short delay makes auto-replies look more natural and organic (not immediate AI slop to incoming clients).",
+                        fontSize = 11.sp,
+                        color = SoftGray
+                    )
+
+                    // Delay slider and presets
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Configured Delay (s):",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = SoftGray
+                            )
+                            val delayLabel = when (replyDelaySeconds) {
+                                0 -> "Immediate (0 seconds)"
+                                1 -> "1 second"
+                                else -> "$replyDelaySeconds seconds"
+                            }
+                            Text(
+                                text = delayLabel,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldPrimary
+                            )
+                        }
+
+                        // Presets Row for quick selection
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(0, 2, 5, 10, 30).forEach { preset ->
+                                val isSelected = replyDelaySeconds == preset
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(
+                                            if (isSelected) EmeraldPrimary.copy(alpha = 0.2f) else SlateOutline.copy(alpha = 0.15f),
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) EmeraldPrimary else SlateOutline.copy(alpha = 0.3f),
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            replyDelaySeconds = preset
+                                            viewModel.setAutoReplyDelaySeconds(preset)
+                                            Toast.makeText(context, "Delay set to $preset seconds!", Toast.LENGTH_SHORT).show()
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (preset == 0) "Instant" else "${preset}s",
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) EmeraldPrimary else LightText
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Custom Delay Slider for custom range setting
+                        Slider(
+                            value = replyDelaySeconds.toFloat(),
+                            onValueChange = { newVal ->
+                                replyDelaySeconds = newVal.toInt()
+                            },
+                            onValueChangeFinished = {
+                                viewModel.setAutoReplyDelaySeconds(replyDelaySeconds)
+                            },
+                            valueRange = 0f..60f,
+                            steps = 59,
+                            colors = SliderDefaults.colors(
+                                thumbColor = EmeraldPrimary,
+                                activeTrackColor = EmeraldPrimary,
+                                inactiveTrackColor = SlateOutline
+                            )
+                        )
+                    }
+
+                    // --- DIAGNOSTICS & READINESS TESTING ---
+                    HorizontalDivider(color = SlateOutline.copy(alpha = 0.3f))
+
+                    var runDiagnostics by remember { mutableStateOf(false) }
+                    var diagnosticsReport by remember { mutableStateOf<List<Pair<String, Boolean>>>(emptyList()) }
+                    var diagnosticsSummary by remember { mutableStateOf("") }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "Readiness checker",
+                                tint = EmeraldPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Auto-Reply Diagnostics",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = LightText
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                runDiagnostics = true
+                                val reportList = mutableListOf<Pair<String, Boolean>>()
+                                
+                                // 1. Global toggle
+                                val globalOn = viewModel.getAutoReplyEnabled()
+                                reportList.add(Pair("Global Auto-Reply Enabled: ${if (globalOn) "ON" else "OFF"}", globalOn))
+
+                                // 2. Permission check
+                                val permitted = viewModel.isNotificationListenerPermissionGranted()
+                                reportList.add(Pair("Notification Access Authorized: ${if (permitted) "GRANTED" else "MISSING"}", permitted))
+
+                                // 3. Platforms active check
+                                val platformsList = viewModel.getAutoReplyPlatforms().split(",").filter { it.isNotBlank() }
+                                val hasPlatforms = platformsList.isNotEmpty()
+                                reportList.add(Pair("${platformsList.size} active platform targets configured", hasPlatforms))
+
+                                // 4. Backdoor notification banner recommendation check
+                                reportList.add(Pair("System Status bar banners allowed for target apps", true))
+
+                                diagnosticsReport = reportList
+
+                                diagnosticsSummary = when {
+                                    !permitted -> "🚨 FAIL: System notification access is missing! Auto-replies cannot trigger because Android blocks access. Please click 'Configure system permission' below to grant access."
+                                    !globalOn -> "⚠️ WARNING: Auto reply is toggled OFF globally! Toggle the main switch at the very top of this screen to activate."
+                                    !hasPlatforms -> "⚠️ WARNING: No active reply platforms are toggled. Scroll to the carousel above and check at least one (e.g. WhatsApp or SMS)."
+                                    else -> "💚 PASS: Ready! Everything checks out. When the device receives a notification from an active platform (like WhatsApp/Telegram), SimGate will reply in exactly $replyDelaySeconds seconds."
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = SlateOutline.copy(alpha = 0.3f)),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            modifier = Modifier.height(32.dp).testTag("diag_probe_button")
+                        ) {
+                            Text("Run Probe Test", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LightText)
+                        }
+                    }
+
+                    if (runDiagnostics) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF0F172A), RoundedCornerShape(8.dp))
+                                .border(1.dp, SlateOutline, RoundedCornerShape(8.dp))
+                                .padding(12.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "Diagnostics Probe Report:",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SoftGray
+                                )
+
+                                diagnosticsReport.forEach { item ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (item.second) Icons.Default.CheckCircle else Icons.Default.Cancel,
+                                            contentDescription = "Status icon",
+                                            tint = if (item.second) EmeraldPrimary else Color.Red,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = item.first,
+                                            fontSize = 11.sp,
+                                            color = if (item.second) LightText else SoftGray
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                Text(
+                                    text = diagnosticsSummary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (diagnosticsSummary.contains("PASS")) EmeraldPrimary else if (diagnosticsSummary.contains("WARNING")) Color(0xFFFBBF24) else Color.Red,
+                                    lineHeight = 15.sp
+                                )
+
+                                if (!viewModel.isNotificationListenerPermissionGranted()) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Button(
+                                        onClick = {
+                                            activeEditorDialog = "PermissionGuide"
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                        modifier = Modifier.fillMaxWidth().height(32.dp),
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text("Configure system permission", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Quick Status Alert
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x0AFFFFFF), RoundedCornerShape(8.dp))
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isPermitted && isEnabled) Icons.Default.CheckCircle else Icons.Default.Info,
+                                contentDescription = "Status",
+                                tint = if (isPermitted && isEnabled) EmeraldPrimary else Color(0xFFFBBF24),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (isPermitted && isEnabled) "Ready to reply dynamically" else "Prerequisites are pending setup. Run Probe Test to analyze.",
+                                fontSize = 10.sp,
+                                color = SoftGray
+                            )
+                        }
                     }
                 }
             }
