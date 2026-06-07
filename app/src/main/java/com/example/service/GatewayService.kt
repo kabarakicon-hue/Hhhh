@@ -259,22 +259,29 @@ class GatewayService : Service() {
     }
 
     private fun startActiveLoops() {
-        // Heartbeat timer every 60s
+        // Heartbeat timer every 60s (or custom dynamic interval)
         heartbeatJob = serviceScope.launch {
             while (isActive) {
-                if (_serviceState.value.isConnected) {
+                val intervalMs = authManager.getHeartbeatIntervalSec() * 1000L
+                if (_serviceState.value.isConnected && !authManager.isGatewayPaused()) {
                     sendHeartbeatToServer()
                 }
-                delay(heartbeatIntervalMs)
+                delay(intervalMs)
             }
         }
 
-        // Job Polling timer every 5s with backoff on reconnect
+        // Job Polling timer with backoff on reconnect
         pollJob = serviceScope.launch {
             while (isActive) {
-                if (_serviceState.value.isConnected) {
+                val intervalMs = authManager.getPollIntervalSec() * 1000L
+                if (authManager.isGatewayPaused()) {
+                    _serviceState.value = _serviceState.value.copy(
+                        connectionMessage = "Paused"
+                    )
+                    delay(intervalMs)
+                } else if (_serviceState.value.isConnected) {
                     pollJobsFromServer()
-                    delay(pollIntervalMs)
+                    delay(intervalMs)
                 } else {
                     // Reconnect attempt if disconnected with backoff
                     connectToServer()

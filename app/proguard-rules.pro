@@ -1,21 +1,52 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Advanced ProGuard/R8 Obfuscation & Hardening Configuration
+# Designed to maximize security against reverse engineering and structural analysis
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# 1. Structural Hardening & Name Obfuscating
+-repackageclasses ""
+-allowaccessmodification
+-flogger:disabled
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Optimize rename dictionaries and inline functions aggressively
+-overloadaggressively
+-repackageclasses ''
+-allowaccessmodification
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Hide original filenames and line numbers to prevent reverse engineering from trace diagnostics
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute ""
+
+# 2. Prevent Debug Logs Leakage in Release
+# This completely strips out verbose and debug logs even if logs or bug-reporting is executed
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}
+
+# 3. Component Keeps (Essential Android Manifest Classes)
+-keep public class * extends android.app.Activity
+-keep public class * extends android.app.Application
+-keep public class * extends android.app.Service
+-keep public class * extends android.content.BroadcastReceiver
+-keep public class * extends android.content.ContentProvider
+-keep public class * extends android.app.backup.BackupAgentHelper
+-keep public class * extends android.preference.Preference
+
+# Keep custom serializable objects and models intact
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+
+# Keep Room compiler models
+-keep class * extends androidx.room.RoomDatabase { *; }
+-dontwarn androidx.room.**
+
+# Keep OkHttp, Coroutines, and Retrofit safe from aggressive shrinking failures
+-keepattributes Signature
+-keepattributes *Annotation*
+-dontwarn okhttp3.**
+-dontwarn retrofit2.**
+-dontwarn kotlinx.coroutines.**
+
+# Keep Moshi JSON parsing code works natively
+-keep class com.example.data.api.** { *; }
+-keep class * { @com.squareup.moshi.Json *; }

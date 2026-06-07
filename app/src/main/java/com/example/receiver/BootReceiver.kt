@@ -18,7 +18,7 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
             Log.d(TAG, "Device rebooted. Checking if Gateway Service needs to start...")
             val authManager = AuthManager(context)
-            if (authManager.isGatewayRunning() && authManager.hasCredentials()) {
+            if (authManager.isStartOnBootEnabled() && authManager.isGatewayRunning() && authManager.hasCredentials()) {
                 Log.d(TAG, "Gateway was previously running. Starting Gateway Service automatically...")
                 val startIntent = Intent(context, GatewayService::class.java).apply {
                     action = GatewayService.ACTION_START

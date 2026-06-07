@@ -5,7 +5,17 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [SmsEntity::class], version = 1, exportSchema = false)
+@Database(
+    entities = [
+        SmsEntity::class,
+        ScheduledSmsEntity::class,
+        SmsDraftEntity::class,
+        SmsTemplateEntity::class,
+        ContactEntity::class
+    ],
+    version = 2,
+    exportSchema = false
+)
 abstract class SmsDatabase : RoomDatabase() {
     abstract fun smsDao(): SmsDao
 
