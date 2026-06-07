@@ -10,6 +10,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -74,6 +75,15 @@ fun SmsGatewayApp(viewModel: SmsGatewayViewModel) {
     val context = LocalContext.current
     var currentTab by remember { mutableStateOf("Home") } // "Home", "History", "SIMs", "Settings"
     var subScreen by remember { mutableStateOf<String?>(null) } // "AdvancedMessaging" or null
+
+    // Intercept system back gestures (swipe screen edge to go back)
+    BackHandler(enabled = subScreen != null || currentTab != "Home") {
+        if (subScreen != null) {
+            subScreen = null
+        } else {
+            currentTab = "Home"
+        }
+    }
 
     // Check runtime SMS and Phone permissions
     val permissionsState = rememberMultiplePermissionsState(
@@ -635,7 +645,7 @@ fun ConnectScreen(viewModel: SmsGatewayViewModel) {
                 val context = LocalContext.current
                 val annotatedString1 = androidx.compose.ui.text.buildAnnotatedString {
                     append("1. Login to your website dashboard at ")
-                    pushStringAnnotation(tag = "URL", annotation = "https://simresend.web.app")
+                    pushStringAnnotation(tag = "URL", annotation = "https://simbridgesend.web.app")
                     pushStyle(
                         style = androidx.compose.ui.text.SpanStyle(
                             color = EmeraldPrimary,
@@ -643,7 +653,7 @@ fun ConnectScreen(viewModel: SmsGatewayViewModel) {
                             fontWeight = FontWeight.Medium
                         )
                     )
-                    append("https://simresend.web.app")
+                    append("https://simbridgesend.web.app")
                     pop()
                     pop()
                 }
@@ -2717,7 +2727,7 @@ fun SettingsScreen(viewModel: SmsGatewayViewModel, onDisconnect: () -> Unit, onN
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("SimGate is a high-performance local SMS gateway relay connecting physical Android transceiver devices to web servers.", fontSize = 13.sp, color = LightText)
                     Text("Features include dual-SIM scheduling, asynchronous SMS processing queue, persistent foreground notification monitoring, and automatic reconnection. Designed on Material 3 guidelines and Jetpack Compose.", fontSize = 12.sp, color = SoftGray)
-                    Text("All data logs remain strictly on device. Connected to gateway server at https://simresend.web.app.", fontSize = 11.sp, color = EmeraldPrimary)
+                    Text("All data logs remain strictly on device. Connected to gateway server at https://simbridgesend.web.app.", fontSize = 11.sp, color = EmeraldPrimary)
                 }
             },
             confirmButton = {
@@ -2969,6 +2979,11 @@ fun OnboardingScreen(viewModel: SmsGatewayViewModel) {
     val areTermsAccepted by viewModel.areTermsAccepted.collectAsStateWithLifecycle()
     val isPrivacyAccepted by viewModel.isPrivacyAccepted.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    // Register BackHandler for Onboarding screen so users can swipe to return back to previous pages
+    BackHandler(enabled = currentPage > 0) {
+        currentPage--
+    }
 
     Box(
         modifier = Modifier
