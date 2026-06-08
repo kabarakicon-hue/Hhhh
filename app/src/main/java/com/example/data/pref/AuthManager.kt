@@ -189,7 +189,7 @@ class AuthManager(private val context: Context) {
     }
 
     fun getGroqModel(): String {
-        return sharedPreferences.getString("groq_model", "llama3-8b-8192") ?: "llama3-8b-8192"
+        return sharedPreferences.getString("groq_model", "llama-3.1-8b-instant") ?: "llama-3.1-8b-instant"
     }
 
     fun setGroqModel(model: String) {
@@ -464,5 +464,99 @@ class AuthManager(private val context: Context) {
 
     fun setSelfDefenseModeEnabled(enabled: Boolean) {
         sharedPreferences.edit().putBoolean("sec_self_defense", enabled).apply()
+    }
+
+    // --- WEBSITE DATABASE SYNC & TRUST CORE ---
+    fun getWebsiteUrl(): String {
+        return sharedPreferences.getString("website_url", "") ?: ""
+    }
+
+    fun setWebsiteUrl(url: String) {
+        sharedPreferences.edit().putString("website_url", url).apply()
+    }
+
+    fun isWebsiteConnected(): Boolean {
+        return sharedPreferences.getBoolean("website_connected", false)
+    }
+
+    fun setWebsiteConnected(connected: Boolean) {
+        sharedPreferences.edit().putBoolean("website_connected", connected).apply()
+    }
+
+    fun getWebsitePublishableKey(): String {
+        var key = sharedPreferences.getString("website_publishable_key", "")
+        if (key.isNullOrBlank()) {
+            key = generateRandomKey("pk_live_")
+            sharedPreferences.edit().putString("website_publishable_key", key).apply()
+        }
+        return key
+    }
+
+    fun getWebsiteSecretToken(): String {
+        var token = sharedPreferences.getString("website_secret_token", "")
+        if (token.isNullOrBlank()) {
+            token = generateRandomKey("sk_live_")
+            sharedPreferences.edit().putString("website_secret_token", token).apply()
+        }
+        return token
+    }
+
+    fun regenerateWebsiteKeys() {
+        val pk = generateRandomKey("pk_live_")
+        val sk = generateRandomKey("sk_live_")
+        sharedPreferences.edit()
+            .putString("website_publishable_key", pk)
+            .putString("website_secret_token", sk)
+            .apply()
+    }
+
+    fun isWebsitePollingEnabled(): Boolean {
+        return sharedPreferences.getBoolean("website_polling_enabled", false)
+    }
+
+    fun setWebsitePollingEnabled(enabled: Boolean) {
+        sharedPreferences.edit().putBoolean("website_polling_enabled", enabled).apply()
+    }
+
+    fun getWebsitePollingIntervalSec(): Int {
+        return sharedPreferences.getInt("website_polling_interval_sec", 30)
+    }
+
+    fun setWebsitePollingIntervalSec(seconds: Int) {
+        sharedPreferences.edit().putInt("website_polling_interval_sec", seconds).apply()
+    }
+
+    fun getWebsiteDecryptionKey(): String {
+        var key = sharedPreferences.getString("website_decryption_key", "")
+        if (key.isNullOrBlank()) {
+            key = generateRandomAesKey()
+            sharedPreferences.edit().putString("website_decryption_key", key).apply()
+        }
+        return key
+    }
+
+    fun regenerateWebsiteDecryptionKey() {
+        val key = generateRandomAesKey()
+        sharedPreferences.edit().putString("website_decryption_key", key).apply()
+    }
+
+    private fun generateRandomAesKey(): String {
+        val allowedChars = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+        return (1..16).map { allowedChars.random() }.joinToString("")
+    }
+
+    private fun generateRandomKey(prefix: String): String {
+        val allowedChars = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+        val randomString = (1..32)
+            .map { allowedChars.random() }
+            .joinToString("")
+        try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val hashBytes = digest.digest(randomString.toByteArray())
+            val hexString = hashBytes.joinToString("") { "%02x".format(it) }
+            return "$prefix${hexString.substring(0, 24)}"
+        } catch (e: Exception) {
+            return "$prefix${randomString.substring(0, 24).lowercase()}"
+        }
     }
 }

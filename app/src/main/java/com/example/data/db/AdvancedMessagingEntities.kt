@@ -39,3 +39,30 @@ data class ContactEntity(
     val phoneNumber: String,
     val source: String // "PhoneContacts" or "HistoryImport"
 )
+
+@Entity(tableName = "dynamic_rows")
+data class DynamicRowEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val tableName: String, // e.g. "users", "products"
+    val itemId: String,    // ID of the user or product
+    val payload: String,   // JSON payload mapping details of the row
+    val lastUpdated: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "hub_event_logs")
+data class HubEventLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val level: String, // "INFO" (Green), "WARNING" (Yellow), "ERROR" (Red)
+    val message: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "notification_audits")
+data class NotificationAuditEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val category: String, // "CONNECTION", "ERROR", "CRASH", "SUGGESTION"
+    val title: String,
+    val message: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+

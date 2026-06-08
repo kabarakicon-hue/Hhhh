@@ -39,11 +39,6 @@ import java.util.*
 fun AutoReplyScreen(viewModel: SmsGatewayViewModel) {
     val context = LocalContext.current
     
-    // Intercept system swipe gestures/back button to close active sub-editors
-    androidx.activity.compose.BackHandler(enabled = activeEditorDialog != null) {
-        activeEditorDialog = null
-    }
-
     // Core state loaded from SharedPreferences
     var isEnabled by remember { mutableStateOf(viewModel.getAutoReplyEnabled()) }
     var activePlatforms by remember { mutableStateOf(viewModel.getAutoReplyPlatforms()) }
@@ -51,6 +46,11 @@ fun AutoReplyScreen(viewModel: SmsGatewayViewModel) {
     
     // Active popup configurations
     var activeEditorDialog by remember { mutableStateOf<String?>(null) } // "Rules", "Menus", "AI", "Fallbacks", "Direct", "Forms", "Welcome", "Schedule"
+
+    // Intercept system swipe gestures/back button to close active sub-editors
+    androidx.activity.compose.BackHandler(enabled = activeEditorDialog != null) {
+        activeEditorDialog = null
+    }
 
     // Permission state checking
     var isPermitted by remember { mutableStateOf(viewModel.isNotificationListenerPermissionGranted()) }

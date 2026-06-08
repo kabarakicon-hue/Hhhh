@@ -77,4 +77,49 @@ interface SmsDao {
 
     @Query("DELETE FROM synced_contacts")
     suspend fun clearContacts()
+
+    // --- DYNAMIC WEBSITE TABLES ---
+    @Query("SELECT * FROM dynamic_rows ORDER BY lastUpdated DESC")
+    fun getAllDynamicRows(): Flow<List<DynamicRowEntity>>
+
+    @Query("SELECT * FROM dynamic_rows WHERE tableName = :tableName ORDER BY lastUpdated DESC")
+    fun getDynamicRowsByTable(tableName: String): Flow<List<DynamicRowEntity>>
+
+    @Query("SELECT * FROM dynamic_rows WHERE tableName = :tableName ORDER BY lastUpdated DESC")
+    suspend fun getDynamicRowsByTableSync(tableName: String): List<DynamicRowEntity>
+
+    @Query("SELECT * FROM dynamic_rows WHERE tableName = :tableName AND itemId = :itemId LIMIT 1")
+    suspend fun getDynamicRow(tableName: String, itemId: String): DynamicRowEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDynamicRow(row: DynamicRowEntity): Long
+
+    @Query("DELETE FROM dynamic_rows WHERE id = :id")
+    suspend fun deleteDynamicRow(id: Long)
+
+    @Query("DELETE FROM dynamic_rows WHERE tableName = :tableName")
+    suspend fun clearDynamicTable(tableName: String)
+
+    @Query("DELETE FROM dynamic_rows")
+    suspend fun clearAllDynamicRows()
+
+    // --- INTEGRATION HUB RUNNING EVENTS LOGS ---
+    @Query("SELECT * FROM hub_event_logs ORDER BY timestamp DESC LIMIT 200")
+    fun getAllHubLogs(): Flow<List<HubEventLogEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertHubLog(log: HubEventLogEntity): Long
+
+    @Query("DELETE FROM hub_event_logs")
+    suspend fun clearHubLogs()
+
+    // --- LOCAL NOTIFICATION AUDITS ---
+    @Query("SELECT * FROM notification_audits ORDER BY timestamp DESC LIMIT 200")
+    fun getAllNotificationAudits(): Flow<List<NotificationAuditEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertNotificationAudit(audit: NotificationAuditEntity): Long
+
+    @Query("DELETE FROM notification_audits")
+    suspend fun clearNotificationAudits()
 }

@@ -11,9 +11,12 @@ import androidx.room.RoomDatabase
         ScheduledSmsEntity::class,
         SmsDraftEntity::class,
         SmsTemplateEntity::class,
-        ContactEntity::class
+        ContactEntity::class,
+        DynamicRowEntity::class,
+        HubEventLogEntity::class,
+        NotificationAuditEntity::class
     ],
-    version = 2,
+    version = 5,
     exportSchema = false
 )
 abstract class SmsDatabase : RoomDatabase() {

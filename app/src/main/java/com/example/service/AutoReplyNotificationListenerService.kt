@@ -399,11 +399,14 @@ class AutoReplyNotificationListenerService : NotificationListenerService() {
             val request = Request.Builder()
                 .url("https://api.groq.com/openai/v1/chat/completions")
                 .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
                 .post(body)
                 .build()
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
+                    val errDetails = response.body?.string() ?: ""
+                    Log.e("AutoReplyService", "Groq error: ${response.code}; Details: $errDetails")
                     return "Error generating reply (Groq error: ${response.code})"
                 }
                 val respBody = response.body?.string() ?: ""

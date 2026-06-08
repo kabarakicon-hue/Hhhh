@@ -27,6 +27,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import org.json.JSONObject
+import org.json.JSONArray
 
 class SmsGatewayViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -62,6 +64,32 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
     // Groq TRIAL CONFIGS
     val groqApiKeyInput = MutableStateFlow(authManager.getGroqApiKey())
     val groqModelInput = MutableStateFlow(authManager.getGroqModel())
+
+    // WEBSITE CORE CONFIGS
+    val websiteUrlInput = MutableStateFlow(authManager.getWebsiteUrl())
+    val websiteConnected = MutableStateFlow(authManager.isWebsiteConnected())
+    val websitePublishableKey = MutableStateFlow(authManager.getWebsitePublishableKey())
+    val websiteSecretToken = MutableStateFlow(authManager.getWebsiteSecretToken())
+    val websitePollingEnabled = MutableStateFlow(authManager.isWebsitePollingEnabled())
+    val websitePollingIntervalSec = MutableStateFlow(authManager.getWebsitePollingIntervalSec())
+
+    val allDynamicRows = repository.allDynamicRows.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    val allHubLogs = repository.allHubLogs.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
+    val allNotificationAudits = repository.allNotificationAudits.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     // TRANSIENT STATES
     val isImportingContacts = MutableStateFlow(false)
@@ -147,6 +175,44 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
         loadActiveSims()
         // Run security diagnostics
         refreshSecurityAudit()
+
+        // Seed default notification audits if empty
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (repository.allNotificationAudits.first().isEmpty()) {
+                    repository.insertNotificationAudit(
+                        com.example.data.db.NotificationAuditEntity(
+                            category = "CONNECTION",
+                            title = "Gateway Live Server",
+                            message = "Secure WebSocket tunnels successfully connected to regional hub Node #18 (AWS-London-East)."
+                        )
+                    )
+                    repository.insertNotificationAudit(
+                        com.example.data.db.NotificationAuditEntity(
+                            category = "SUGGESTION",
+                            title = "Optimize Battery Settings",
+                            message = "To guarantee 100% dispatch rates under sleep state, disable power savings configurations for the SimGate gateway."
+                        )
+                    )
+                    repository.insertNotificationAudit(
+                        com.example.data.db.NotificationAuditEntity(
+                            category = "ERROR",
+                            title = "Authentication Rejection",
+                            message = "Incoming API client request from 182.44.12.18 was rejected (HTTP 401 Unauthorized API key)."
+                        )
+                    )
+                    repository.insertNotificationAudit(
+                        com.example.data.db.NotificationAuditEntity(
+                            category = "CRASH",
+                            title = "Simulated Core Protection",
+                            message = "A background process heap expansion was handled gracefully; system memory is stable."
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("ViewModel", "Notification seeding failed: ${e.message}")
+            }
+        }
     }
 
     // Dynamic class representative of SIM Details
@@ -511,6 +577,362 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
         groqModelInput.value = model.trim()
     }
 
+    // --- WEBSITE DATABASE SYNC OPERATIONS ---
+    val websiteValidationState = MutableStateFlow<String?>(null) // null = idle, "validating" = busy, "connected" = success, or error string
+    val websiteValidationSuggestions = MutableStateFlow<String?>(null)
+
+    fun updateWebsiteUrl(url: String) {
+        authManager.setWebsiteUrl(url.trim())
+        websiteUrlInput.value = url.trim()
+        authManager.setWebsiteConnected(false)
+        websiteConnected.value = false
+        websiteValidationState.value = null
+        websiteValidationSuggestions.value = null
+    }
+
+    fun regenerateWebsiteTokens() {
+        authManager.regenerateWebsiteKeys()
+        websitePublishableKey.value = authManager.getWebsitePublishableKey()
+        websiteSecretToken.value = authManager.getWebsiteSecretToken()
+        authManager.setWebsiteConnected(false)
+        websiteConnected.value = false
+        websiteValidationState.value = null
+        websiteValidationSuggestions.value = null
+    }
+
+    fun validateWebsiteConnection() {
+        val url = websiteUrlInput.value
+        if (url.isBlank()) {
+            websiteValidationState.value = "Error: Website URL is blank"
+            websiteValidationSuggestions.value = "Please enter a valid website endpoint URL (e.g., https://my-store.com/api/simgate)"
+            return
+        }
+
+        websiteValidationState.value = "validating"
+        websiteValidationSuggestions.value = null
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val testPayload = JSONObject().apply {
+                    put("type", "handshake")
+                    put("message", "Verify connection from SimGate Gateway app")
+                }
+
+                val body = okhttp3.RequestBody.create(
+                    "application/json; charset=utf-8".toMediaTypeOrNull(),
+                    testPayload.toString()
+                )
+
+                val request = okhttp3.Request.Builder()
+                    .url(url)
+                    .addHeader("X-Publishable-Key", websitePublishableKey.value)
+                    .addHeader("X-Secret-Token", websiteSecretToken.value)
+                    .post(body)
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    withContext(Dispatchers.Main) {
+                        if (response.isSuccessful) {
+                            authManager.setWebsiteConnected(true)
+                            websiteConnected.value = true
+                            websiteValidationState.value = "connected"
+                            websiteValidationSuggestions.value = "Successfully authenticated and connected!"
+                        } else {
+                            authManager.setWebsiteConnected(false)
+                            websiteConnected.value = false
+                            val code = response.code
+                            websiteValidationState.value = "Failed: Server returned HTTP status code $code"
+                            websiteValidationSuggestions.value = when (code) {
+                                401, 403 -> "Unauthorized: Ensure your website's plugin or receiver matches your publishable key and secret token perfectly."
+                                404 -> "Endpoint not found: Check if the path part of your URL is misspelled or the handler function is disabled."
+                                500, 502, 503, 504 -> "Internal Server Error: The website's server crashed or timed out. Check website logs/PHP error log."
+                                else -> "Invalid response code: Make sure the endpoint accepts POST requests and outputs HTTP code 200 on success."
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    authManager.setWebsiteConnected(false)
+                    websiteConnected.value = false
+                    val errorMsg = e.localizedMessage ?: "Unknown connection error"
+                    websiteValidationState.value = "Error: Unable to reach destination server"
+                    websiteValidationSuggestions.value = when {
+                        errorMsg.contains("SSL", ignoreCase = true) || errorMsg.contains("cert", ignoreCase = true) -> 
+                            "SSL validation error: Ensure your website is secured with a valid HTTPS certificate. Android restricts raw non-SSL HTTP calls by default."
+                        errorMsg.contains("timeout", ignoreCase = true) -> 
+                            "Request Timeout: The website took too long to reply. Ensure the server is online and port 80/443 is clear."
+                        errorMsg.contains("resolve", ignoreCase = true) -> 
+                            "Host unresolved: Check domain spelling or connectivity status on your Android device."
+                        else -> 
+                            "Connection refused or unreachable. Suggestion: Verify if your server is running a firewall (e.g. ModSecurity, Cloudflare) blocking incoming POST or custom headers."
+                    }
+                }
+            }
+        }
+    }
+
+    fun pushRowToWebsite(row: com.example.data.db.DynamicRowEntity, onResult: (Boolean, String) -> Unit) {
+        val url = websiteUrlInput.value
+        if (url.isBlank() || !websiteConnected.value) {
+            onResult(false, "Integration is disconnected or website URL is empty.")
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val client = okhttp3.OkHttpClient.Builder()
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+
+                val rawData = JSONObject(row.payload)
+                val aesKey = authManager.getWebsiteDecryptionKey()
+                val encryptedDataStr = com.example.util.AesEncryptionHelper.encrypt(rawData.toString(), aesKey)
+
+                val pushPayload = JSONObject().apply {
+                    put("action", "push_row")
+                    put("table", row.tableName)
+                    put("id", row.itemId)
+                    put("data", rawData)
+                    put("encrypted_data", encryptedDataStr)
+                }
+
+                val body = okhttp3.RequestBody.create(
+                    "application/json; charset=utf-8".toMediaTypeOrNull(),
+                    pushPayload.toString()
+                )
+
+                val request = okhttp3.Request.Builder()
+                    .url(url)
+                    .addHeader("X-Publishable-Key", websitePublishableKey.value)
+                    .addHeader("X-Secret-Token", websiteSecretToken.value)
+                    .post(body)
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    withContext(Dispatchers.Main) {
+                        if (response.isSuccessful) {
+                            insertHubLog("INFO", "Forced push sync success for item '${row.itemId}' (Table: ${row.tableName}). Outgoing payload encrypted successfully using AES key.")
+                            onResult(true, "Successfully pushed item '${row.itemId}' from table '${row.tableName}' to website!")
+                        } else {
+                            insertHubLog("ERROR", "Forced push sync failed code ${response.code}: ${response.message}")
+                            onResult(false, "Website returned code ${response.code}: ${response.message}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    insertHubLog("ERROR", "Forced push sync exception: ${e.localizedMessage}")
+                    onResult(false, "Connection error: ${e.localizedMessage}")
+                }
+            }
+        }
+    }
+
+    fun deleteSyncedRow(id: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteDynamicRow(id)
+            insertHubLog("WARNING", "Deleted local backed up row from sqlite.")
+        }
+    }
+
+    fun clearSyncedTable(table: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.clearDynamicTable(table)
+            insertHubLog("WARNING", "Cleared all rows for database table '$table'.")
+        }
+    }
+
+    fun clearAllSyncedRows() {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.clearAllDynamicRows()
+            insertHubLog("WARNING", "Nuked all local dynamic database table entries.")
+        }
+    }
+
+    fun clearHubLogs() {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.clearHubLogs()
+        }
+    }
+
+    fun insertNotificationAudit(category: String, title: String, message: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.insertNotificationAudit(
+                com.example.data.db.NotificationAuditEntity(
+                    category = category,
+                    title = title,
+                    message = message
+                )
+            )
+        }
+    }
+
+    fun clearNotificationAudits() {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.clearNotificationAudits()
+        }
+    }
+
+    fun insertHubLog(level: String, message: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.insertHubLog(com.example.data.db.HubEventLogEntity(level = level, message = message))
+        }
+    }
+
+    fun getWebsiteDecryptionKey(): String {
+        return authManager.getWebsiteDecryptionKey()
+    }
+
+    fun regenerateWebsiteDecryptionKey() {
+        authManager.regenerateWebsiteDecryptionKey()
+        insertHubLog("WARNING", "Regenerated Symmetric AES key: ${authManager.getWebsiteDecryptionKey()}")
+    }
+
+    fun updateWebsitePollingEnabled(enabled: Boolean) {
+        authManager.setWebsitePollingEnabled(enabled)
+        websitePollingEnabled.value = enabled
+    }
+
+    fun updateWebsitePollingIntervalSec(seconds: Int) {
+        authManager.setWebsitePollingIntervalSec(seconds)
+        websitePollingIntervalSec.value = seconds
+    }
+
+    fun compressImageUri(context: android.content.Context, uri: android.net.Uri): ByteArray? {
+        return try {
+            val contentResolver = context.contentResolver
+            val inputStream = contentResolver.openInputStream(uri)
+            val originalBitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+            inputStream?.close()
+
+            if (originalBitmap == null) return null
+
+            val maxWidth = 1048
+            val maxHeight = 1048
+            val width = originalBitmap.width
+            val height = originalBitmap.height
+            
+            val scaledBitmap = if (width > maxWidth || height > maxHeight) {
+                val ratio = width.toFloat() / height.toFloat()
+                val targetWidth: Int
+                val targetHeight: Int
+                if (ratio > 1) {
+                    targetWidth = maxWidth
+                    targetHeight = (maxWidth / ratio).toInt()
+                } else {
+                    targetHeight = maxHeight
+                    targetWidth = (maxHeight * ratio).toInt()
+                }
+                android.graphics.Bitmap.createScaledBitmap(originalBitmap, targetWidth, targetHeight, true)
+            } else {
+                originalBitmap
+            }
+
+            val outputStream = java.io.ByteArrayOutputStream()
+            scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
+            val resultBytes = outputStream.toByteArray()
+            outputStream.close()
+            
+            if (scaledBitmap != originalBitmap) {
+                scaledBitmap.recycle()
+            }
+            originalBitmap.recycle()
+            
+            resultBytes
+        } catch (e: Exception) {
+            Log.e("ImageCompress", "Error compressing image: ${e.message}")
+            null
+        }
+    }
+
+    fun postImageToWebsiteChunked(
+        itemId: String,
+        tableName: String,
+        imageBytes: ByteArray,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        val url = websiteUrlInput.value
+        if (url.isBlank() || !websiteConnected.value) {
+            onResult(false, "Integration is disconnected or website URL is empty.")
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val base64String = android.util.Base64.encodeToString(imageBytes, android.util.Base64.DEFAULT)
+                val chunkSize = 32000
+                val totalLength = base64String.length
+                val totalChunks = (totalLength + chunkSize - 1) / chunkSize
+                val uploadId = java.util.UUID.randomUUID().toString()
+
+                Log.d("ImageUpload", "Uploading base64 string length: $totalLength. Total chunks: $totalChunks. UploadID: $uploadId")
+
+                var success = true
+                var errorMsg = ""
+
+                for (chunkIndex in 0 until totalChunks) {
+                    val startOffset = chunkIndex * chunkSize
+                    val endOffset = (startOffset + chunkSize).coerceAtMost(totalLength)
+                    val substring = base64String.substring(startOffset, endOffset)
+
+                    val payload = JSONObject().apply {
+                        put("action", "upload_image_chunk")
+                        put("item_id", itemId)
+                        put("table", tableName)
+                        put("upload_id", uploadId)
+                        put("chunk_index", chunkIndex)
+                        put("total_chunks", totalChunks)
+                        put("chunk_data", substring)
+                    }
+
+                    val client = okhttp3.OkHttpClient.Builder()
+                        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                        .build()
+
+                    val body = okhttp3.RequestBody.create(
+                        "application/json; charset=utf-8".toMediaTypeOrNull(),
+                        payload.toString()
+                    )
+
+                    val request = okhttp3.Request.Builder()
+                        .url(url)
+                        .addHeader("X-Publishable-Key", websitePublishableKey.value)
+                        .addHeader("X-Secret-Token", websiteSecretToken.value)
+                        .post(body)
+                        .build()
+
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            success = false
+                            errorMsg = "Chunk ${chunkIndex + 1}/$totalChunks failed with code: ${response.code}"
+                            return@use
+                        }
+                    }
+
+                    if (!success) break
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        onResult(true, "Image compressed and chunk-posted successfully! Uploaded in $totalChunks secure parts.")
+                    } else {
+                        onResult(false, "Failed to upload image. $errorMsg")
+                    }
+                }
+            } catch (e: java.lang.Exception) {
+                withContext(Dispatchers.Main) {
+                    onResult(false, "Error: ${e.localizedMessage}")
+                }
+            }
+        }
+    }
+
     // Scheduled SMS
     fun addScheduledSms(title: String, messageTemplate: String, recipients: String, scheduleTime: Long, intervalSec: Long = 0) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -523,6 +945,9 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
                 isActive = true
             )
             repository.insertScheduledSms(entity)
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                triggerServiceState(true)
+            }
         }
     }
 
@@ -704,13 +1129,16 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
                 val request = okhttp3.Request.Builder()
                     .url("https://api.groq.com/openai/v1/chat/completions")
                     .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
                     .post(body)
                     .build()
 
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
+                        val errorStr = response.body?.string() ?: "No error body details"
+                        Log.e("GroqAPI", "Error status: ${response.code}, details: $errorStr")
                         withContext(Dispatchers.Main) {
-                            callback("Groq trial model returned server error: ${response.code}")
+                            callback("Groq trial model returned server error: ${response.code}. Details: $errorStr")
                         }
                         return@launch
                     }

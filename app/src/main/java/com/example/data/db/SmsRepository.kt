@@ -54,4 +54,24 @@ class SmsRepository(private val smsDao: SmsDao) {
     suspend fun insertContacts(contacts: List<ContactEntity>) = smsDao.insertContacts(contacts)
     suspend fun insertContact(contact: ContactEntity): Long = smsDao.insertContact(contact)
     suspend fun clearContacts() = smsDao.clearContacts()
+
+    // --- DYNAMIC WEBSITE TABLES ---
+    val allDynamicRows: Flow<List<DynamicRowEntity>> = smsDao.getAllDynamicRows()
+    fun getDynamicRowsByTable(tableName: String): Flow<List<DynamicRowEntity>> = smsDao.getDynamicRowsByTable(tableName)
+    suspend fun getDynamicRowsByTableSync(tableName: String): List<DynamicRowEntity> = smsDao.getDynamicRowsByTableSync(tableName)
+    suspend fun getDynamicRow(tableName: String, itemId: String): DynamicRowEntity? = smsDao.getDynamicRow(tableName, itemId)
+    suspend fun insertDynamicRow(row: DynamicRowEntity): Long = smsDao.insertDynamicRow(row)
+    suspend fun deleteDynamicRow(id: Long) = smsDao.deleteDynamicRow(id)
+    suspend fun clearDynamicTable(tableName: String) = smsDao.clearDynamicTable(tableName)
+    suspend fun clearAllDynamicRows() = smsDao.clearAllDynamicRows()
+
+    // --- INTEGRATION HUB RUNNING EVENTS LOGS ---
+    val allHubLogs: Flow<List<HubEventLogEntity>> = smsDao.getAllHubLogs()
+    suspend fun insertHubLog(log: HubEventLogEntity): Long = smsDao.insertHubLog(log)
+    suspend fun clearHubLogs() = smsDao.clearHubLogs()
+
+    // --- LOCAL NOTIFICATION AUDITS ---
+    val allNotificationAudits: Flow<List<NotificationAuditEntity>> = smsDao.getAllNotificationAudits()
+    suspend fun insertNotificationAudit(audit: NotificationAuditEntity): Long = smsDao.insertNotificationAudit(audit)
+    suspend fun clearNotificationAudits() = smsDao.clearNotificationAudits()
 }

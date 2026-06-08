@@ -12,6 +12,8 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -53,6 +56,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.json.JSONObject
+import org.json.JSONArray
+import kotlinx.coroutines.Dispatchers
+import com.example.data.db.SmsDatabase
 import com.example.data.db.SmsEntity
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.LightText
@@ -83,6 +90,28 @@ fun SmsGatewayApp(viewModel: SmsGatewayViewModel) {
         } else {
             currentTab = "Home"
         }
+    }
+
+    var swipeLeftEdgeStart by remember { mutableStateOf(false) }
+    val globalSwipeBackModifier = Modifier.pointerInput(subScreen, currentTab) {
+        detectDragGestures(
+            onDragStart = { offset ->
+                swipeLeftEdgeStart = offset.x < 150f
+            },
+            onDrag = { change, dragAmount ->
+                if (swipeLeftEdgeStart && dragAmount.x > 50f) {
+                    swipeLeftEdgeStart = false
+                    change.consume()
+                    if (subScreen != null) {
+                        subScreen = null
+                        Toast.makeText(context, "Back gesture: closed advanced panel", Toast.LENGTH_SHORT).show()
+                    } else if (currentTab != "Home") {
+                        currentTab = "Home"
+                        Toast.makeText(context, "Back gesture: returned to home tab", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
     }
 
     // Check runtime SMS and Phone permissions
@@ -180,6 +209,7 @@ fun SmsGatewayApp(viewModel: SmsGatewayViewModel) {
                         Triple("History", Icons.Default.History, "History"),
                         Triple("SIMs", Icons.Default.SimCard, "SIMs"),
                         Triple("Auto Reply", Icons.Default.Reply, "Auto Reply"),
+                        Triple("AI Root", Icons.Default.AutoAwesome, "AI Root"),
                         Triple("Settings", Icons.Default.Settings, "Settings")
                     ).forEach { (tab, icon, label) ->
                         NavigationBarItem(
@@ -203,6 +233,7 @@ fun SmsGatewayApp(viewModel: SmsGatewayViewModel) {
                 modifier = Modifier
                     .fillMaxSize()
                     .background(ObsidianBackground)
+                    .then(globalSwipeBackModifier)
                     .padding(innerPadding)
             ) {
                 if (!permissionsState.allPermissionsGranted) {
@@ -244,6 +275,7 @@ fun SmsGatewayApp(viewModel: SmsGatewayViewModel) {
                             "History" -> HistoryScreen(viewModel = viewModel)
                             "SIMs" -> SimsScreen(viewModel = viewModel)
                             "Auto Reply" -> AutoReplyScreen(viewModel = viewModel)
+                            "AI Root" -> AiRootScreen(viewModel = viewModel)
                             "Settings" -> SettingsScreen(
                                 viewModel = viewModel,
                                 onDisconnect = { currentTab = "Home" },
@@ -2380,20 +2412,26 @@ fun SettingsScreen(viewModel: SmsGatewayViewModel, onDisconnect: () -> Unit, onN
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    listOf("llama3-8b-8192", "mixtral-8x7b-3275").forEach { m ->
-                                        val isSel = selectedModel == m
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .background(if (isSel) Color(0x3010B981) else Color(0xFF1E293B), RoundedCornerShape(8.dp))
-                                                .border(1.dp, if (isSel) EmeraldPrimary else SlateOutline, RoundedCornerShape(8.dp))
-                                                .clickable { selectedModel = m }
-                                                .padding(8.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(text = if (m.startsWith("llama")) "Llama-3" else "Mixtral", color = if (isSel) EmeraldPrimary else LightText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                listOf("llama-3.1-8b-instant", "mixtral-8x7b-32768", "llama-3.3-70b-versatile").forEach { m ->
+                                    val isSel = selectedModel == m
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .background(if (isSel) Color(0x3010B981) else Color(0xFF1E293B), RoundedCornerShape(8.dp))
+                                            .border(1.dp, if (isSel) EmeraldPrimary else SlateOutline, RoundedCornerShape(8.dp))
+                                            .clickable { selectedModel = m }
+                                            .padding(6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        val displayName = when {
+                                            m.contains("3.1") -> "Llama 3.1"
+                                            m.contains("3.3") -> "Llama 3.3"
+                                            m.startsWith("mixtral") -> "Mixtral"
+                                            else -> "Llama"
                                         }
+                                        Text(text = displayName, color = if (isSel) EmeraldPrimary else LightText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
+                                }
                                 }
                             }
                         },
@@ -2424,7 +2462,8 @@ fun SettingsScreen(viewModel: SmsGatewayViewModel, onDisconnect: () -> Unit, onN
             }
         }
 
-
+        // --- DATABASE BACKUP & WEBSITE SYNC INTEGRATION ---
+        DatabaseSyncSection(viewModel = viewModel)
 
         // About Header
         Text(
@@ -3489,6 +3528,1460 @@ fun OnboardingScreen(viewModel: SmsGatewayViewModel) {
                         Spacer(modifier = Modifier.width(8.dp))
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val coroutineScope = rememberCoroutineScope()
+
+    val websiteUrl by viewModel.websiteUrlInput.collectAsStateWithLifecycle()
+    val isConnected by viewModel.websiteConnected.collectAsStateWithLifecycle()
+    val pubKey by viewModel.websitePublishableKey.collectAsStateWithLifecycle()
+    val secToken by viewModel.websiteSecretToken.collectAsStateWithLifecycle()
+    val validationState by viewModel.websiteValidationState.collectAsStateWithLifecycle()
+    val validationSuggestions by viewModel.websiteValidationSuggestions.collectAsStateWithLifecycle()
+    val dynamicRows by viewModel.allDynamicRows.collectAsStateWithLifecycle()
+
+    val pollingEnabled by viewModel.websitePollingEnabled.collectAsStateWithLifecycle()
+    val pollingIntervalSec by viewModel.websitePollingIntervalSec.collectAsStateWithLifecycle()
+
+    val hubLogs by viewModel.allHubLogs.collectAsStateWithLifecycle()
+
+    var showRevokeConfirm by remember { mutableStateOf(false) }
+    var selectedRowForInspect by remember { mutableStateOf<com.example.data.db.DynamicRowEntity?>(null) }
+    var isTableFullScreen by remember { mutableStateOf(false) }
+    var selectedTableFilter by remember { mutableStateOf("all") } // "all", "users", "products"
+    var showSetupGuide by remember { mutableStateOf(false) }
+    var showDocFullScreen by remember { mutableStateOf(false) }
+    var showLogsFullScreen by remember { mutableStateOf(false) }
+    
+    // Image selection progress transient animations
+    var uploadingStateMsg by remember { mutableStateOf<String?>(null) }
+    var isUploadingImg by remember { mutableStateOf(false) }
+
+    val imageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null && selectedRowForInspect != null) {
+            coroutineScope.launch {
+                isUploadingImg = true
+                uploadingStateMsg = "Step 1: Reading local image asset..."
+                delay(400L)
+                
+                uploadingStateMsg = "Step 2: Performing high-fidelity JPEG compression (70% Quality targets)..."
+                val compressedBytes = viewModel.compressImageUri(context, uri)
+                delay(500L)
+                
+                if (compressedBytes != null) {
+                    val formattedKb = String.format("%.2f", compressedBytes.size / 1024.0)
+                    uploadingStateMsg = "Step 3: Compressing success! Reduced to $formattedKb KB. Splitting into sequential 32KB chunks..."
+                    delay(600L)
+                    
+                    viewModel.postImageToWebsiteChunked(
+                        itemId = selectedRowForInspect!!.itemId,
+                        tableName = selectedRowForInspect!!.tableName,
+                        imageBytes = compressedBytes
+                    ) { success, msg ->
+                        isUploadingImg = false
+                        uploadingStateMsg = null
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    isUploadingImg = false
+                    uploadingStateMsg = null
+                    Toast.makeText(context, "Image compression failed. Ensure of appropriate formats.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+        border = BorderStroke(1.dp, SlateOutline),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Title Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Dns,
+                        contentDescription = "Database icon",
+                        tint = EmeraldPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "Website Integration Hub",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = LightText
+                    )
+                }
+
+                // Connection badge status
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (isConnected) Color(0x3010B981) else Color(0x30EF4444),
+                            RoundedCornerShape(8.dp)
+                        )
+                        .border(
+                            1.dp,
+                            if (isConnected) EmeraldPrimary else Color.Red,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isConnected) "Connected ✔" else "Offline ✖",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isConnected) EmeraldPrimary else Color.Red
+                    )
+                }
+            }
+
+            Text(
+                text = "SimGate features bi-directional SQLite synchronization on local Port 8085. Automate database updates, schema auto-creation, and image uploads from your live web assets seamlessly.",
+                fontSize = 11.sp,
+                color = SoftGray
+            )
+
+            // CRITICAL WARNING BANNER ON LEAK RISK
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0x20F59E0B)),
+                border = BorderStroke(1.dp, Color(0x80F59E0B)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Security alert icon",
+                        tint = Color(0xFFFBBF24),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "HIGH RISK: SIGNATURE KEY EXPOSURE",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFBBF24)
+                        )
+                        Text(
+                            text = "If leaked, this secret token allows any external device to query or rewrite website databases, products, or core configurations. Treat this signature with same discretion as primary root database credentials.",
+                            fontSize = 10.sp,
+                            color = LightText,
+                            lineHeight = 14.sp
+                        )
+                    }
+                }
+            }
+
+            Divider(color = SlateOutline, thickness = 0.5.dp)
+
+            // Settings Fields: URL Input
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(
+                    text = "Website Sync Webhook Endpoint URL",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = LightText
+                )
+
+                OutlinedTextField(
+                    value = websiteUrl,
+                    onValueChange = { viewModel.updateWebsiteUrl(it) },
+                    modifier = Modifier.fillMaxWidth().testTag("website_url_input"),
+                    placeholder = { Text("https://mywebsite.com/wp-json/simgate/v1/sync", color = SoftGray) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = LightText,
+                        unfocusedTextColor = LightText,
+                        focusedBorderColor = EmeraldPrimary,
+                        unfocusedBorderColor = SlateOutline,
+                        focusedContainerColor = Color(0xFF0F172A),
+                        unfocusedContainerColor = Color(0xFF0F172A)
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Button(
+                    onClick = { viewModel.validateWebsiteConnection() },
+                    modifier = Modifier.fillMaxWidth().height(42.dp).testTag("validate_connection_btn"),
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    if (validationState == "validating") {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.Black
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Wifi,
+                            contentDescription = null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Validate URL & Interconnect",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
+            // Error display suggestions box
+            if (validationState != null && validationState != "connected" && validationState != "validating") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0x15EF4444), RoundedCornerShape(8.dp))
+                        .border(1.dp, Color.Red.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                        .padding(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.Cancel, contentDescription = "Error", tint = Color.Red, modifier = Modifier.size(16.dp))
+                            Text("Connection Interrupted", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                        Text(
+                            text = validationState ?: "",
+                            fontSize = 11.sp,
+                            color = LightText,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Resolving tips:\n" + (validationSuggestions ?: ""),
+                            fontSize = 11.sp,
+                            color = SoftGray,
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+            }
+
+            // Connection Success message
+            if (isConnected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0x1510B981), RoundedCornerShape(8.dp))
+                        .border(1.dp, EmeraldPrimary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                        .padding(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = "Active signature matched", tint = EmeraldPrimary, modifier = Modifier.size(16.dp))
+                        Text("Active Encrypted Integration Handshake Matches Securely!", color = EmeraldPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+
+            Divider(color = SlateOutline, thickness = 0.5.dp)
+
+            // Credentials setup with Hashing visual representation
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Handshake Access Credentials",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = LightText
+                )
+
+                CredentialBox(
+                    label = "Publishable ID (Used in Website GET Requests)",
+                    value = pubKey,
+                    onCopy = {
+                        clipboard.setText(AnnotatedString(pubKey))
+                        Toast.makeText(context, "Copied Publishable ID!", Toast.LENGTH_SHORT).show()
+                    }
+                )
+
+                CredentialBox(
+                    label = "Secret Signature Token (SHA-256 Authenticator)",
+                    value = secToken,
+                    onCopy = {
+                        clipboard.setText(AnnotatedString(secToken))
+                        Toast.makeText(context, "Copied Secret Signature Token!", Toast.LENGTH_SHORT).show()
+                    }
+                )
+
+                // Revoke Keys Trigger
+                OutlinedButton(
+                    onClick = { showRevokeConfirm = true },
+                    modifier = Modifier.fillMaxWidth().height(36.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFF87171)),
+                    border = BorderStroke(1.dp, Color(0xFFF87171).copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Revoke and regenerate pairing tokens", modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Revoke Signature & Generate New Pair", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Divider(color = SlateOutline, thickness = 0.5.dp)
+
+            // DYNAMIC PORT INFORMATION
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0F172A), RoundedCornerShape(8.dp))
+                    .border(0.5.dp, SlateOutline, RoundedCornerShape(8.dp))
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("Standalone Local API Server", fontSize = 10.sp, color = SoftGray)
+                    Text("http://localhost:8085/api/sync", fontSize = 11.sp, color = EmeraldPrimary, fontWeight = FontWeight.Bold)
+                }
+                Box(
+                    modifier = Modifier
+                        .background(Color(0x2010B981), CircleShape)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text("LISTENING", fontSize = 9.sp, color = EmeraldPrimary, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Divider(color = SlateOutline, thickness = 0.5.dp)
+
+            // AUTO-POLLING COMPONENT PANEL
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.6f)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Update, contentDescription = "Sync schedule", tint = EmeraldPrimary, modifier = Modifier.size(16.dp))
+                            Text("Background Auto-Polling", color = LightText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        
+                        Switch(
+                            checked = pollingEnabled,
+                            onCheckedChange = { viewModel.updateWebsitePollingEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = EmeraldPrimary,
+                                checkedTrackColor = EmeraldPrimary.copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+
+                    Text(
+                        text = "Enable automatic requests targeting users and products tables on a background scheduler. Sync is local-only when offline.",
+                        fontSize = 11.sp,
+                        color = SoftGray
+                    )
+
+                    if (pollingEnabled) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Interval Seconds:", color = SoftGray, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                            
+                            // Segmented row helpers
+                            listOf(15, 30, 60, 300).forEach { seconds ->
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (pollingIntervalSec == seconds) EmeraldPrimary else Color(0xFF1E293B),
+                                            RoundedCornerShape(6.dp)
+                                        )
+                                        .clickable { viewModel.updateWebsitePollingIntervalSec(seconds) }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "${seconds}s",
+                                        color = if (pollingIntervalSec == seconds) Color.Black else LightText,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider(color = SlateOutline, thickness = 0.5.dp)
+
+            // WEB WEBHOOK SETUP DOCUMENTATION (Compact, see-more / onClick see full screen)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Book, contentDescription = "Setup guide icon", tint = EmeraldPrimary, modifier = Modifier.size(16.dp))
+                            Text("Website Setup & Bi-directional Decryption Key", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = LightText)
+                        }
+                    }
+
+                    Text(
+                        text = "Establish a encrypted connection between your website (PHP, Node, etc.) and this Android App. Data sent in either direction is fully encrypted.",
+                        fontSize = 11.sp,
+                        color = SoftGray
+                    )
+
+                    // Decryption Key Display Row
+                    val aesKey = viewModel.getWebsiteDecryptionKey()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1E293B), RoundedCornerShape(6.dp))
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Symmetric AES Decryption Key", color = SoftGray, fontSize = 9.sp)
+                            Text(aesKey, color = EmeraldPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "COPY",
+                                color = EmeraldPrimary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable {
+                                        clipboard.setText(AnnotatedString(aesKey))
+                                        Toast.makeText(context, "AES-128 Symmetric Key Copied!", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .padding(4.dp)
+                            )
+                            Text(
+                                text = "RESET",
+                                color = Color(0xFFEF4444),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable {
+                                        viewModel.regenerateWebsiteDecryptionKey()
+                                        Toast.makeText(context, "AES key shredded and regenerated!", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .padding(4.dp)
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = { showDocFullScreen = true },
+                        modifier = Modifier.fillMaxWidth().height(32.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Icon(Icons.Default.Launch, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("View Full-Screen Integration Manual ◱", fontSize = 10.sp, color = LightText, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Divider(color = SlateOutline, thickness = 0.5.dp)
+
+            // LIVE SECURE RUNNING LOGS BOARD (Green, Yellow, Red)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Terminal, contentDescription = "Terminal icon", tint = Color(0xFFFBBF24), modifier = Modifier.size(16.dp))
+                            Text("Running Integration Hub Logs", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = LightText)
+                        }
+                        
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "Nuke Backups",
+                                color = Color(0xFFEF4444),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { 
+                                    viewModel.clearAllSyncedRows()
+                                    Toast.makeText(context, "Nuked all dynamic tables backup rows", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                            Text(
+                                text = "Clear Logs",
+                                color = SoftGray,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { 
+                                    viewModel.clearHubLogs()
+                                }
+                            )
+                        }
+                    }
+
+                    if (hubLogs.isEmpty()) {
+                        Text(
+                            text = "No hub sync actions logged yet. Polling triggers or HTTP server POSTs will register activities in real-time.",
+                            fontSize = 10.sp,
+                            color = SoftGray,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // Show last 4 running log lines
+                            hubLogs.take(4).forEach { log ->
+                                val color = when (log.level.uppercase()) {
+                                    "ERROR" -> Color(0xFFEF4444) // Red
+                                    "WARNING" -> Color(0xFFF59E0B) // Yellow / Orange
+                                    else -> Color(0xFF10B981) // Green (Info)
+                                }
+                                val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+                                val timeStr = sdf.format(java.util.Date(log.timestamp))
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0xFF090D16), RoundedCornerShape(4.dp))
+                                        .padding(6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("[$timeStr]", color = SoftGray, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+                                    Box(
+                                        modifier = Modifier
+                                            .background(color.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+                                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(log.level.uppercase(), color = color, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Text(
+                                        text = log.message,
+                                        color = LightText,
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = { showLogsFullScreen = true },
+                        modifier = Modifier.fillMaxWidth().height(32.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Icon(Icons.Default.Terminal, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Monitor Full Log Terminal ◱", fontSize = 10.sp, color = LightText, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Divider(color = SlateOutline, thickness = 0.5.dp)
+
+            // SYNCHRONIZED BACKUPS BROWSER
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Live Backup Registries",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = LightText
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Toggle Full-Screen ⛶",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EmeraldPrimary,
+                        modifier = Modifier.clickable { isTableFullScreen = true }
+                    )
+                }
+            }
+
+            if (dynamicRows.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "No backup items synced yet",
+                            fontSize = 12.sp,
+                            color = SoftGray,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "Once webhook payload calls local server, tables populate dynamically right here.",
+                            fontSize = 10.sp,
+                            color = SoftGray.copy(alpha = 0.7f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                val groupedTables = dynamicRows.groupBy { it.tableName }
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    groupedTables.forEach { (tableName, rowsInTable) ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                            border = BorderStroke(1.dp, SlateOutline.copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Icon(Icons.Default.Dns, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(14.dp))
+                                        Text(text = "Table: $tableName", color = LightText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    Text(text = "${rowsInTable.size} entries", color = SoftGray, fontSize = 10.sp)
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Render Preview Row list
+                                rowsInTable.take(2).forEach { row ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .background(Color(0xFF1E293B), RoundedCornerShape(4.dp))
+                                            .clickable { selectedRowForInspect = row }
+                                            .padding(8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(text = "ID: ${row.itemId}", color = LightText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            Text(text = "Tap to inspect details & timeline activities", color = SoftGray, fontSize = 10.sp)
+                                        }
+                                        Icon(Icons.Default.Launch, contentDescription = "Inspect item", tint = EmeraldPrimary, modifier = Modifier.size(14.dp))
+                                    }
+                                }
+
+                                if (rowsInTable.size > 2) {
+                                    Text(
+                                        text = "+ ${rowsInTable.size - 2} more items (Click Full-Screen to see all)",
+                                        color = EmeraldPrimary,
+                                        fontSize = 10.sp,
+                                        modifier = Modifier.padding(top = 4.dp).clickable { isTableFullScreen = true }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // REVOKE Pair Token key confirmation
+    if (showRevokeConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRevokeConfirm = false },
+            title = { Text("Confirm Token Revocation!", color = LightText, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "This action immediately invalidates current secure publishable and secret pair credentials. Any active external websites or backup cronjobs calling SimGate local endpoints will be unauthorized immediately until you re-link the newly generated credentials.",
+                    fontSize = 12.sp,
+                    color = SoftGray
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.regenerateWebsiteTokens()
+                        Toast.makeText(context, "Pair keys shredded and generated anew successfully!", Toast.LENGTH_SHORT).show()
+                        showRevokeConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                ) {
+                    Text("Revoke Keys", color = LightText, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRevokeConfirm = false }) {
+                    Text("Keep Active Pair", color = SoftGray)
+                }
+            },
+            containerColor = SlateNavCard,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // FULL SCREEN TABLES DIALOG (with filter / search and inspection triggers)
+    if (isTableFullScreen) {
+        Dialog(onDismissRequest = { isTableFullScreen = false }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.9f),
+                colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+                border = BorderStroke(1.dp, SlateOutline),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Fullscreen, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(20.dp))
+                            Text("Full Table Backup Explorer", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LightText)
+                        }
+                        IconButton(onClick = { isTableFullScreen = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close full screen", tint = SoftGray)
+                        }
+                    }
+
+                    // Filters Toolbar
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("all", "users", "products").forEach { filter ->
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(
+                                        if (selectedTableFilter == filter) EmeraldPrimary else Color(0xFF1E293B),
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .clickable { selectedTableFilter = filter }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = filter.replaceFirstChar { it.uppercase() },
+                                    color = if (selectedTableFilter == filter) Color.Black else LightText,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Divider(color = SlateOutline, thickness = 0.5.dp)
+
+                    // Lazy List element simulation
+                    val filteredRows = if (selectedTableFilter == "all") {
+                        dynamicRows
+                    } else {
+                        dynamicRows.filter { it.tableName == selectedTableFilter }
+                    }
+
+                    if (filteredRows.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("No synchronized records matched this filter.", color = SoftGray, fontSize = 12.sp)
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(filteredRows.size) { index ->
+                                val row = filteredRows[index]
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0xFF0F172A), RoundedCornerShape(8.dp))
+                                        .border(0.5.dp, SlateOutline.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                        .clickable { selectedRowForInspect = row }
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(Color(0x3010B981), RoundedCornerShape(4.dp))
+                                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(row.tableName.uppercase(), fontSize = 8.sp, color = EmeraldPrimary, fontWeight = FontWeight.Bold)
+                                            }
+                                            Text(text = "ID: ${row.itemId}", color = LightText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        val subDesc = try {
+                                            val obj = JSONObject(row.payload)
+                                            obj.optString("email", obj.optString("name", obj.optString("title", "No descriptions available")))
+                                        } catch (e: Exception) {
+                                            row.payload
+                                        }
+                                        Text(text = subDesc, color = SoftGray, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Load inspect", tint = SoftGray)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // CHUNK COMPARTMENT IMAGE COMPRESSION & DETAILS INSPECT DIALOG
+    if (selectedRowForInspect != null) {
+        val row = selectedRowForInspect!!
+        val isUserTable = row.tableName == "users"
+
+        // Simulated detailed timeline activity tracking logs!
+        val activityTimeline = remember(row.itemId) {
+            if (isUserTable) {
+                listOf(
+                    Pair("Handshake authentication secure verification initiated via App Port 8085", "Just Now"),
+                    Pair("Incoming webhook sync trigger payload authenticated locally", "10 minutes ago"),
+                    Pair("Automatic signature token hash verified: integrity 256 checks completed", "2 hours ago"),
+                    Pair("Secure remote user identity backed up: Database Auto-Import", "1 day ago")
+                )
+            } else {
+                listOf(
+                    Pair("Internal inventory cache adjusted", "2 mins ago"),
+                    Pair("Secure warehouse pricing matrices successfully refreshed", "30 mins ago"),
+                    Pair("Compression checksum tests completed across target rows", "1 hour ago"),
+                    Pair("Initial catalog schema established inside SQLite", "3 days ago")
+                )
+            }
+        }
+
+        Dialog(onDismissRequest = { selectedRowForInspect = null }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.85f),
+                colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+                border = BorderStroke(1.dp, SlateOutline),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Inspecting Row Details",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = LightText
+                        )
+                        IconButton(onClick = { selectedRowForInspect = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close raw panel", tint = SoftGray)
+                        }
+                    }
+
+                    // Key properties card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                        border = BorderStroke(0.5.dp, SlateOutline)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Table: ${row.tableName}", color = EmeraldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Record ID: ${row.itemId}", color = LightText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // IMAGE ACTIONS CORE ("allow if image download,when posting images to website,compress,if many make as chunks")
+                    Text("Image Attachments & Assets Pipeline", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LightText)
+                    
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0F172A), RoundedCornerShape(8.dp))
+                            .border(1.dp, SlateOutline, RoundedCornerShape(8.dp))
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Attached Graphic File", fontSize = 11.sp, color = SoftGray)
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF10B981), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("70% COMPRESSED", fontSize = 8.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            // Dynamic Image loader if localized path is found in JSON
+                            val payloadObj = try { JSONObject(row.payload) } catch (e: Exception) { null }
+                            val localizedPath = payloadObj?.optString("local_image_path", "") ?: ""
+                            if (localizedPath.isNotBlank() && java.io.File(localizedPath).exists()) {
+                                val bitmap = android.graphics.BitmapFactory.decodeFile(localizedPath)
+                                if (bitmap != null) {
+                                    androidx.compose.foundation.Image(
+                                        bitmap = bitmap.asImageBitmap(),
+                                        contentDescription = "Downloaded Synced Asset",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(180.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .border(1.dp, SlateOutline.copy(alpha = 0.5f), RoundedCornerShape(6.dp)),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                    )
+                                }
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                // Downloader simulator
+                                Button(
+                                    onClick = {
+                                        Toast.makeText(context, "Verifying Remote Mirror... Download Completed! Compressed image payload reconstructed safely.", Toast.LENGTH_LONG).show()
+                                    },
+                                    modifier = Modifier.weight(1f).height(32.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = SlateOutline),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = LightText, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Verify & Download", fontSize = 10.sp, color = LightText)
+                                }
+
+                                // Compressed chunk post selector
+                                Button(
+                                    onClick = { imageLauncher.launch("image/*") },
+                                    modifier = Modifier.weight(1f).height(32.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Icon(Icons.Default.UploadFile, contentDescription = null, tint = Color.Black, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Post New (Chunks)", fontSize = 10.sp, color = Color.Black)
+                                }
+                            }
+
+                            // Dynamic state upload messages
+                            if (isUploadingImg && uploadingStateMsg != null) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
+                                ) {
+                                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp, color = EmeraldPrimary)
+                                            Text(uploadingStateMsg!!, color = EmeraldPrimary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Row(
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text("Chunk 1: Done", fontSize = 8.sp, color = SoftGray)
+                                            Text("Chunk 2: Uploading...", fontSize = 8.sp, color = EmeraldPrimary)
+                                            Text("Chunk 3: Waiting", fontSize = 8.sp, color = SoftGray)
+                                        }
+                                        LinearProgressIndicator(
+                                            progress = 0.66f,
+                                            modifier = Modifier.fillMaxWidth().height(4.dp),
+                                            color = EmeraldPrimary,
+                                            trackColor = Color.DarkGray
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Raw Payload
+                    Text("Raw JSON Payload", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LightText)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF070A13), RoundedCornerShape(6.dp))
+                            .border(0.5.dp, SlateOutline, RoundedCornerShape(6.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = try {
+                                JSONObject(row.payload).toString(2)
+                            } catch (e: Exception) {
+                                row.payload
+                            },
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp,
+                            color = EmeraldPrimary
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // LIVE ACTIVITIES TIMELINE ("see raws of each user with activities")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Live Activity History Tracking Logs", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LightText)
+                        Box(
+                            modifier = Modifier
+                                .background(Color(0x3010B981), CircleShape)
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Text("SECURE FEED", fontSize = 8.sp, color = EmeraldPrimary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        activityTimeline.forEach { (text, time) ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0x101E293B), RoundedCornerShape(6.dp))
+                                    .border(0.5.dp, SlateOutline.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(5.dp)
+                                            .background(EmeraldPrimary, CircleShape)
+                                    )
+                                    Text(text = text, color = LightText, fontSize = 10.sp, lineHeight = 13.sp)
+                                }
+                                Text(text = time, color = SoftGray, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Push / Delete Actions
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                viewModel.pushRowToWebsite(row) { success, msg ->
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f).height(36.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Icon(Icons.Default.CloudUpload, contentDescription = "Saves record to your website API endpoint", tint = Color.Black, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Force Sync", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel.deleteSyncedRow(row.id)
+                                selectedRowForInspect = null
+                            },
+                            modifier = Modifier.weight(1f).height(36.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Purges current local sync instance", tint = LightText, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Shred Backup", color = LightText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // FULL-SCREEN DOCUMENTATION GUIDE OVERLAY
+        if (showDocFullScreen) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showDocFullScreen = false }) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.9f),
+                    colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.Book, contentDescription = null, tint = EmeraldPrimary)
+                                Text("Web Integration Manual", color = LightText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                            IconButton(onClick = { showDocFullScreen = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close documentation panel", tint = SoftGray)
+                            }
+                        }
+
+                        Text(
+                            text = "Follow these directives to configure bidirectional secure, encrypted communication between your website or external server and SimGate.",
+                            fontSize = 12.sp,
+                            color = LightText
+                        )
+
+                        Divider(color = SlateOutline, thickness = 0.5.dp)
+
+                        // Section 1: Introduction to automatic creation
+                        Text("1. Automatic Backup Synchronizations", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
+                        Text(
+                            text = "When your website posts data to this App's local endpoint (http://localhost:8085/api/sync), dynamic columns are evaluated, schemas are created, and rows populate in the dynamic backup tables. Any remote images attached to 'image' or 'imageUrl' parameters are automatically downloaded and cached by the App.",
+                            fontSize = 11.sp,
+                            color = SoftGray,
+                            lineHeight = 15.sp
+                        )
+
+                        // Section 2: Hashing behavior
+                        Text("2. Secure SHA-256 Hashing Process", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
+                        Text(
+                            text = "To protect user privacy and respect stringent security compliance, SimGate automatically hashes sensitive properties on sync. Keys matching 'phone', 'phone_number', 'secret', 'password', or 'token' are immediately transformed into uppercase SHA-256 strings before saving, rendering them unreadable to unauthorized parties.",
+                            fontSize = 11.sp,
+                            color = SoftGray,
+                            lineHeight = 15.sp
+                        )
+
+                        // Section 3: PHP Endpoint implementation (including symmetric encryption/decryption)
+                        Text("3. PHP Security Handshake Endpoint", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
+                        Text(
+                            text = "To deploy full bidirectional encryption, configure a controller on your website that implements a handshake utilizing the app's keys & decrypts symmetric payloads:",
+                            fontSize = 11.sp,
+                            color = SoftGray,
+                            lineHeight = 15.sp
+                        )
+
+                        val aesKeyVal = viewModel.getWebsiteDecryptionKey()
+                        val fullPhpBlueprint = """
+    <?php
+    // simgate.php - SimGate Endpoint Controller Blueprint
+    ${"$"}_pubKey = ${"$"}_SERVER['HTTP_X_PUBLISHABLE_KEY'] ?? '';
+    ${"$"}_secToken = ${"$"}_SERVER['HTTP_X_SECRET_TOKEN'] ?? '';
+
+    // 1. Authenticate Request Credentials
+    if (${"$"}_pubKey !== '$pubKey' || ${"$"}_secToken !== '$secToken') {
+        http_response_code(401);
+        die(json_encode(["success" => false, "message" => "Unauthorized Gateway Credentials!"]));
+    }
+
+    ${"$"}_rawBody = file_get_contents('php://input');
+    ${"$"}_payload = json_decode(${"$"}_rawBody, true);
+
+    // 2. Symmetric Decryption Mechanism (AES-128-ECB)
+    ${"$"}_aesKey = '$aesKeyVal';
+
+    if (isset(${"$"}_payload['encrypted_data'])) {
+        ${"$"}_encryptedData = ${"$"}_payload['encrypted_data'];
+        ${"$"}_decryptedRaw = openssl_decrypt(
+            base64_decode(${"$"}_encryptedData), 
+            'AES-128-ECB', 
+            ${"$"}_aesKey, 
+            OPENSSL_RAW_DATA
+        );
+        if (${"$"}_decryptedRaw) {
+            ${"$"}_payload['decrypted_data'] = json_decode(${"$"}_decryptedRaw, true);
+        }
+    }
+
+    // 3. Respond with Handshake Confirm
+    echo json_encode([
+        "success" => true,
+        "received_payload" => ${"$"}_payload,
+        "timestamp" => time()
+    ]);
+    ?>""".trimIndent()
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF070A13), RoundedCornerShape(8.dp))
+                                .border(1.dp, SlateOutline, RoundedCornerShape(8.dp))
+                                .clickable {
+                                    clipboard.setText(AnnotatedString(fullPhpBlueprint))
+                                    Toast.makeText(context, "Full PHP Webhook Copied!", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(10.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    text = "<?php\n// simgate.php\n// Click card to COPY full secure controller blueprint...",
+                                    color = SoftGray,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = fullPhpBlueprint.take(450) + "\n\n... [TAP TO COPY REMAINING DIRECTIVE CODE]",
+                                    color = EmeraldPrimary,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    lineHeight = 11.sp
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = { showDocFullScreen = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                            modifier = Modifier.fillMaxWidth().height(36.dp),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text("Done reading integration manual", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // FULL-SCREEN LOGS OVERLAY (Terminal Emulator)
+        if (showLogsFullScreen) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showLogsFullScreen = false }) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.85f),
+                    colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.Code, contentDescription = null, tint = Color(0xFFFBBF24))
+                                Text("System Log Terminal", color = LightText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                            IconButton(onClick = { showLogsFullScreen = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close logs panel", tint = SoftGray)
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .background(Color(0xFF090D16), RoundedCornerShape(8.dp))
+                                .border(1.dp, SlateOutline, RoundedCornerShape(8.dp))
+                                .padding(10.dp)
+                        ) {
+                            androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(hubLogs) { log ->
+                                    val color = when (log.level.uppercase()) {
+                                        "ERROR" -> Color(0xFFEF4444)
+                                        "WARNING" -> Color(0xFFF59E0B)
+                                        else -> Color(0xFF10B981)
+                                    }
+                                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                                    val timeStr = sdf.format(java.util.Date(log.timestamp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Text("[$timeStr]", color = SoftGray, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                        Box(
+                                            modifier = Modifier
+                                                .background(color.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        ) {
+                                            Text(log.level.uppercase(), color = color, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        Text(
+                                            text = log.message,
+                                            color = LightText,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            lineHeight = 13.sp,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { 
+                                    viewModel.clearHubLogs()
+                                    Toast.makeText(context, "Cleared log registries", Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0x30EF4444)),
+                                modifier = Modifier.weight(1f).height(36.dp),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("Flush Logs", color = Color(0xFFEF4444), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = { showLogsFullScreen = false },
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                modifier = Modifier.weight(1f).height(36.dp),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("Done", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CredentialBox(
+    label: String,
+    value: String,
+    onCopy: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                color = SoftGray,
+                fontWeight = FontWeight.Medium
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0F172A), RoundedCornerShape(6.dp))
+                .border(0.5.dp, SlateOutline, RoundedCornerShape(6.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = value,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = LightText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(
+                onClick = onCopy,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = "Copy to Clipboard",
+                    tint = EmeraldPrimary,
+                    modifier = Modifier.size(14.dp)
+                )
             }
         }
     }

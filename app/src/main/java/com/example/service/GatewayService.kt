@@ -37,6 +37,10 @@ import com.example.util.NetworkUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import org.json.JSONObject
+import org.json.JSONArray
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -104,6 +108,9 @@ class GatewayService : Service() {
     private var pollJob: Job? = null
     private var heartbeatJob: Job? = null
     private var statusUpdateJob: Job? = null
+    private var scheduledSmsJob: Job? = null
+    private var websitePollJob: Job? = null
+    private var localHttpServer: com.sun.net.httpserver.HttpServer? = null
 
     // Broadcaster list of registered SMS receivers
     private val smsSentReceivers = mutableMapOf<String, BroadcastReceiver>()
@@ -153,16 +160,12 @@ class GatewayService : Service() {
             return
         }
 
-        if (!authManager.hasCredentials()) {
-            Log.e(TAG, "Cannot start service: No credentials saved!")
-            stopSelf()
-            return
-        }
+        val hasCreds = authManager.hasCredentials()
 
         authManager.setGatewayRunning(true)
         _serviceState.value = _serviceState.value.copy(
             isRunning = true,
-            connectionMessage = "Reconnecting..."
+            connectionMessage = if (hasCreds) "Reconnecting..." else "Local-Only Scheduler Active"
         )
 
         // Reset tracking jobs
@@ -181,11 +184,19 @@ class GatewayService : Service() {
         updateDynamicSimStatus()
 
         // Create and start foreground with notification
-        val notification = buildServiceNotification("Connecting to server...")
+        val notification = buildServiceNotification(if (hasCreds) "Connecting to server..." else "Local-Only Scheduler Active")
         startForeground(NOTIFICATION_ID, notification)
 
-        // Perform initial connect call
-        connectToServer()
+        // Perform initial connect call if credentials exist
+        if (hasCreds) {
+            connectToServer()
+        } else {
+            Log.i(TAG, "Gateway running in Local-Only Standalone mode. Server connection skipped.")
+        }
+
+        // Start Standalone Website sync HTTP server
+        startLocalHttpServer()
+        startWebsitePolling()
     }
 
     private fun stopGatewayService() {
@@ -195,6 +206,8 @@ class GatewayService : Service() {
         pollJob?.cancel()
         heartbeatJob?.cancel()
         statusUpdateJob?.cancel()
+        scheduledSmsJob?.cancel()
+        websitePollJob?.cancel()
         serviceJob.cancel()
 
         // Unregister any active sent receivers
@@ -214,6 +227,7 @@ class GatewayService : Service() {
         )
 
         stopForeground(true)
+        stopLocalHttpServer()
         stopSelf()
     }
 
@@ -291,6 +305,18 @@ class GatewayService : Service() {
                 }
             }
         }
+
+        // Continuous exact timer for local scheduled SMS (every 1 second)
+        scheduledSmsJob = serviceScope.launch {
+            while (isActive) {
+                try {
+                    checkAndProcessScheduledSms()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error checking/sending scheduled SMS: ${e.message}")
+                }
+                delay(1000L)
+            }
+        }
     }
 
     private fun connectToServer() {
@@ -306,6 +332,15 @@ class GatewayService : Service() {
                 Log.d(TAG, "Connecting to sever for validation...")
                 val response = RetrofitClient.getService(this@GatewayService).connectDevice(ConnectRequest(devId, devToken))
                 if (response.isSuccessful) {
+                    serviceScope.launch(Dispatchers.IO) {
+                        repository.insertNotificationAudit(
+                            com.example.data.db.NotificationAuditEntity(
+                                category = "CONNECTION",
+                                title = "Gateway Connected",
+                                message = "Secure connection verified with target dispatcher API server."
+                            )
+                        )
+                    }
                     withContext(Dispatchers.Main) {
                         retryIndex = 0 // Reset backoff levels
                         if (!_serviceState.value.isConnected) {
@@ -328,6 +363,15 @@ class GatewayService : Service() {
     }
 
     private fun handleConnectionFailure(reason: String) {
+        serviceScope.launch(Dispatchers.IO) {
+            repository.insertNotificationAudit(
+                com.example.data.db.NotificationAuditEntity(
+                    category = "CONNECTION",
+                    title = "Connection Interrupted",
+                    message = "Handshake failed or lost connectivity: $reason. Backoff retry scheduled."
+                )
+            )
+        }
         serviceScope.launch(Dispatchers.Main) {
             _serviceState.value = _serviceState.value.copy(
                 isConnected = false,
@@ -537,6 +581,14 @@ class GatewayService : Service() {
     }
 
     private fun reportSuccess(job: SmsJob, simDetails: String) {
+        if (authManager.isSmsSentNotificationEnabled()) {
+            showLocalNotification(
+                title = "SMS Sent Successfully",
+                body = "To: ${job.recipient}\nMessage: ${job.message}",
+                isSuccess = true
+            )
+        }
+
         val devId = authManager.getDeviceId() ?: return
         val devToken = authManager.getDeviceToken() ?: return
 
@@ -569,6 +621,14 @@ class GatewayService : Service() {
     }
 
     private fun reportFailure(job: SmsJob, reason: String, simDetails: String) {
+        if (authManager.isSmsFailedNotificationEnabled()) {
+            showLocalNotification(
+                title = "SMS Delivery Failed",
+                body = "To: ${job.recipient}\nReason: $reason\nMessage: ${job.message}",
+                isSuccess = false
+            )
+        }
+
         val devId = authManager.getDeviceId() ?: return
         val devToken = authManager.getDeviceToken() ?: return
 
@@ -762,6 +822,508 @@ class GatewayService : Service() {
         manager.notify(NOTIFICATION_ID, buildServiceNotification(text))
     }
 
+    private suspend fun checkAndProcessScheduledSms() {
+        val list = repository.allScheduledSms.first()
+        val now = System.currentTimeMillis()
+        list.forEach { task ->
+            if (task.isActive && task.scheduleTime <= now) {
+                Log.i(TAG, "Found active overdue scheduled task (ID: ${task.id}, title: ${task.title}, time: ${task.scheduleTime})")
+                // Reschedule if interval is set, otherwise mark inactive
+                if (task.intervalSec > 0) {
+                    val nextTime = now + (task.intervalSec * 1000L)
+                    val rescheduledTask = task.copy(scheduleTime = nextTime, isActive = true)
+                    repository.insertScheduledSms(rescheduledTask)
+                } else {
+                    repository.updateScheduledSmsStatus(task.id, false)
+                }
+                // Send it!
+                sendScheduledSms(task)
+            }
+        }
+    }
+
+    private fun sendScheduledSms(task: com.example.data.db.ScheduledSmsEntity) {
+        serviceScope.launch(Dispatchers.Default) {
+            // Find appropriate SmsManager/SIM ID
+            val activeSimPref = authManager.getSelectedSim()
+            var usedSimDetails = "Default SIM"
+            var subId = -1
+
+            if (ContextCompat.checkSelfPermission(
+                    this@GatewayService,
+                    Manifest.permission.READ_PHONE_STATE
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                val subManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+                val list = subManager.activeSubscriptionInfoList
+                if (!list.isNullOrEmpty()) {
+                    if (activeSimPref.startsWith("SIM 1") && list.size > 0) {
+                        val subInfo = list.find { it.simSlotIndex == 0 } ?: list[0]
+                        subId = subInfo.subscriptionId
+                        usedSimDetails = "SIM 1 (${subInfo.carrierName})"
+                    } else if (activeSimPref.startsWith("SIM 2") && list.size > 1) {
+                        val subInfo = list.find { it.simSlotIndex == 1 } ?: list.getOrNull(1) ?: list[0]
+                        subId = subInfo.subscriptionId
+                        usedSimDetails = "SIM 2 (${subInfo.carrierName})"
+                    } else {
+                        // "Auto" or "Default"
+                        val defaultSmsId = SubscriptionManager.getDefaultSmsSubscriptionId()
+                        val subInfo = list.find { it.subscriptionId == defaultSmsId } ?: list[0]
+                        subId = subInfo.subscriptionId
+                        usedSimDetails = "Auto [SIM ${subInfo.simSlotIndex + 1} (${subInfo.carrierName})]"
+                    }
+                }
+            }
+
+            // Split comma-separated recipients
+            val phoneList = task.recipients.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            if (phoneList.isEmpty()) {
+                Log.w(TAG, "No valid recipients for scheduled task: ${task.title}")
+                return@launch
+            }
+
+            try {
+                // Initialize SmsManager
+                val smsManager = if (subId != -1) {
+                    SmsManager.getSmsManagerForSubscriptionId(subId)
+                } else {
+                    SmsManager.getDefault()
+                }
+
+                phoneList.forEach { phone ->
+                    // Prepare tracking intents or use local log
+                    val sentAction = "SMS_SCHEDULED_SENT_${task.id}_${System.currentTimeMillis()}"
+                    
+                    // Set up receiver dynamically
+                    val sentReceiver = object : BroadcastReceiver() {
+                        override fun onReceive(context: Context, intent: Intent) {
+                            try {
+                                unregisterReceiver(this)
+                            } catch (e: Exception) {
+                                // Ignore
+                            }
+                            val code = resultCode
+                            if (code == Activity.RESULT_OK) {
+                                Log.i(TAG, "Scheduled SMS sent successfully to $phone")
+                                if (authManager.isSmsSentNotificationEnabled()) {
+                                    showLocalNotification(
+                                        title = "Scheduled SMS Sent",
+                                        body = "To: $phone\nMessage: ${task.messageTemplate}",
+                                        isSuccess = true
+                                    )
+                                }
+                                serviceScope.launch(Dispatchers.IO) {
+                                    repository.insertLog(
+                                        SmsEntity(
+                                            type = "Sent",
+                                            phoneNumber = phone,
+                                            message = task.messageTemplate,
+                                            status = "Sent",
+                                            simUsed = usedSimDetails
+                                        )
+                                    )
+                                    updateStats(this@GatewayService)
+                                }
+                            } else {
+                                val errorReason = when (code) {
+                                    SmsManager.RESULT_ERROR_GENERIC_FAILURE -> "Generic failure"
+                                    SmsManager.RESULT_ERROR_NO_SERVICE -> "No cellular service"
+                                    SmsManager.RESULT_ERROR_NULL_PDU -> "Null PDU"
+                                    SmsManager.RESULT_ERROR_RADIO_OFF -> "Radio turned off"
+                                    else -> "Error code $code"
+                                }
+                                Log.e(TAG, "Scheduled SMS failed to $phone: $errorReason")
+                                if (authManager.isSmsFailedNotificationEnabled()) {
+                                    showLocalNotification(
+                                        title = "Scheduled SMS Failed",
+                                        body = "To: $phone\nReason: $errorReason\nMessage: ${task.messageTemplate}",
+                                        isSuccess = false
+                                    )
+                                }
+                                serviceScope.launch(Dispatchers.IO) {
+                                    repository.insertLog(
+                                        SmsEntity(
+                                            type = "Failed",
+                                            phoneNumber = phone,
+                                            message = task.messageTemplate,
+                                            status = "Failed",
+                                            simUsed = usedSimDetails,
+                                            errorMessage = errorReason
+                                        )
+                                    )
+                                    updateStats(this@GatewayService)
+                                }
+                            }
+                        }
+                    }
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        registerReceiver(sentReceiver, IntentFilter(sentAction), Context.RECEIVER_EXPORTED)
+                    } else {
+                        registerReceiver(sentReceiver, IntentFilter(sentAction))
+                    }
+
+                    val sentPI = PendingIntent.getBroadcast(
+                        this@GatewayService,
+                        0,
+                        Intent(sentAction).apply { `package` = packageName },
+                        PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+
+                    Log.d(TAG, "Sending scheduled SMS to: $phone on $usedSimDetails...")
+                    val parts = smsManager.divideMessage(task.messageTemplate)
+                    if (parts.size > 1) {
+                        val sentIntents = ArrayList<PendingIntent>().apply { add(sentPI) }
+                        smsManager.sendMultipartTextMessage(phone, null, parts, sentIntents, null)
+                    } else {
+                        smsManager.sendTextMessage(phone, null, task.messageTemplate, sentPI, null)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception in scheduled SMS dispatch: ${e.message}")
+                phoneList.forEach { phone ->
+                    if (authManager.isSmsFailedNotificationEnabled()) {
+                        showLocalNotification(
+                            title = "Scheduled SMS Failed",
+                            body = "To: $phone\nReason: ${e.localizedMessage ?: "Exception"}\nMessage: ${task.messageTemplate}",
+                            isSuccess = false
+                        )
+                    }
+                    serviceScope.launch(Dispatchers.IO) {
+                        repository.insertLog(
+                            SmsEntity(
+                                type = "Failed",
+                                phoneNumber = phone,
+                                message = task.messageTemplate,
+                                status = "Failed",
+                                simUsed = usedSimDetails,
+                                errorMessage = e.localizedMessage ?: "Device driver execution exception"
+                            )
+                        )
+                        updateStats(this@GatewayService)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startLocalHttpServer() {
+        try {
+            stopLocalHttpServer()
+            val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress(8085), 0)
+            server.createContext("/api/sync") { exchange ->
+                var responseCode = 200
+                var responseText = ""
+                try {
+                    val method = exchange.requestMethod
+                    val authHeaderKey = exchange.requestHeaders.getFirst("X-Publishable-Key") ?: ""
+                    val authHeaderToken = exchange.requestHeaders.getFirst("X-Secret-Token") ?: ""
+
+                    val localPk = authManager.getWebsitePublishableKey()
+                    val localSk = authManager.getWebsiteSecretToken()
+
+                    if (authHeaderKey != localPk || authHeaderToken != localSk) {
+                        responseCode = 401
+                        responseText = "{\"success\":false,\"error\":\"Unauthorized credentials mapping failed.\"}"
+                    } else if (method == "POST") {
+                        val body = exchange.requestBody.bufferedReader().use { it.readText() }
+                        var json = JSONObject(body)
+                        val aesKey = authManager.getWebsiteDecryptionKey()
+                        
+                        if (json.has("encrypted_data")) {
+                            try {
+                                val encStr = json.getString("encrypted_data")
+                                val decStr = com.example.util.AesEncryptionHelper.decrypt(encStr, aesKey)
+                                if (decStr != encStr && decStr.startsWith("{")) {
+                                    json = JSONObject(decStr)
+                                    serviceScope.launch(Dispatchers.IO) {
+                                        repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                            level = "INFO",
+                                            message = "Received encrypted payload. Successfully decrypted using symmetric AES key."
+                                        ))
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                serviceScope.launch(Dispatchers.IO) {
+                                    repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                        level = "ERROR",
+                                        message = "Failed to decrypt incoming payload: ${e.message}"
+                                    ))
+                                }
+                            }
+                        }
+
+                        val table = json.optString("table", "unknown")
+                        serviceScope.launch(Dispatchers.IO) {
+                            repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                level = "INFO",
+                                message = "HTTP POST sync request received for local table '$table'."
+                            ))
+                        }
+                        
+                        if (json.has("data")) {
+                            val dataObj = json.get("data")
+                            serviceScope.launch(Dispatchers.IO) {
+                                try {
+                                    if (dataObj is JSONArray) {
+                                        for (i in 0 until dataObj.length()) {
+                                            val rowItem = dataObj.getJSONObject(i)
+                                            val idStr = if (rowItem.has("id")) rowItem.get("id").toString() else UUID.randomUUID().toString()
+                                            
+                                            // Process sensitivities (Hash + images download)
+                                            val hashed = com.example.util.SmsGatewaySecurityAndSyncUtils.hashSensitiveDataInPayload(rowItem.toString())
+                                            val localized = com.example.util.SmsGatewaySecurityAndSyncUtils.downloadAndLocalizeImagesInPayload(applicationContext, hashed, repository)
+                                            
+                                            repository.insertDynamicRow(
+                                                com.example.data.db.DynamicRowEntity(
+                                                    tableName = table,
+                                                    itemId = idStr,
+                                                    payload = localized
+                                                )
+                                            )
+                                        }
+                                        repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                            level = "INFO",
+                                            message = "Sync success: Ingested and secured ${dataObj.length()} items into table '$table'."
+                                        ))
+                                    } else if (dataObj is JSONObject) {
+                                        val idStr = if (dataObj.has("id")) dataObj.get("id").toString() else UUID.randomUUID().toString()
+                                        
+                                        // Process sensitivities (Hash + images download)
+                                        val hashed = com.example.util.SmsGatewaySecurityAndSyncUtils.hashSensitiveDataInPayload(dataObj.toString())
+                                        val localized = com.example.util.SmsGatewaySecurityAndSyncUtils.downloadAndLocalizeImagesInPayload(applicationContext, hashed, repository)
+                                        
+                                        repository.insertDynamicRow(
+                                            com.example.data.db.DynamicRowEntity(
+                                                tableName = table,
+                                                itemId = idStr,
+                                                payload = localized
+                                            )
+                                        )
+                                        repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                            level = "INFO",
+                                            message = "Sync success: Ingested and secured 1 item into table '$table'."
+                                        ))
+                                    }
+                                } catch (e: Exception) {
+                                    repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                        level = "ERROR",
+                                        message = "Failed saving HTTP database posts: ${e.message}"
+                                    ))
+                                }
+                            }
+                        }
+
+                        responseCode = 200
+                        responseText = "{\"success\":true,\"message\":\"Data synchronized and localized with local Dynamic Table '$table'. Hashed sensitive fields, downloaded media.\"}"
+                    } else if (method == "GET") {
+                        val query = exchange.requestURI.query
+                        val queryMap = if (!query.isNullOrBlank()) {
+                            query.split("&").associate {
+                                val split = it.split("=")
+                                val k = split.getOrNull(0) ?: ""
+                                val v = split.getOrNull(1) ?: ""
+                                k to v
+                            }
+                        } else emptyMap()
+
+                        val table = queryMap["table"] ?: "users"
+                        val itemId = queryMap["id"]
+
+                        responseText = if (itemId != null) {
+                            val row = runBlocking { repository.getDynamicRow(table, itemId) }
+                            if (row != null) {
+                                row.payload
+                            } else {
+                                responseCode = 404
+                                "{\"success\":false,\"error\":\"Item ID $itemId not found in $table table.\"}"
+                            }
+                        } else {
+                            val rows = runBlocking { repository.getDynamicRowsByTableSync(table) }
+                            val arr = JSONArray()
+                            rows.forEach {
+                                arr.put(JSONObject(it.payload))
+                            }
+                            arr.toString()
+                        }
+                    } else {
+                        responseCode = 405
+                        responseText = "Method Not Allowed"
+                    }
+                } catch (e: Exception) {
+                    responseCode = 500
+                    responseText = "{\"success\":false,\"error\":\"${e.localizedMessage?.replace("\"", "\\\"")}\"}"
+                }
+
+                val bytes = responseText.toByteArray(Charsets.UTF_8)
+                exchange.responseHeaders.set("Content-Type", "application/json")
+                exchange.sendResponseHeaders(responseCode, bytes.size.toLong())
+                exchange.responseBody.use { it.write(bytes) }
+            }
+            server.executor = null
+            server.start()
+            localHttpServer = server
+            Log.i(TAG, "Local stand-alone integration HTTP API Server successfully listening on port 8085")
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to boot standalone HTTP server: ${e.message}")
+        }
+    }
+
+    private fun stopLocalHttpServer() {
+        try {
+            localHttpServer?.stop(0)
+            localHttpServer = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping Http Server: ${e.message}")
+        }
+    }
+
+    private fun startWebsitePolling() {
+        websitePollJob?.cancel()
+        websitePollJob = serviceScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                val isEnabled = authManager.isWebsitePollingEnabled()
+                val url = authManager.getWebsiteUrl()
+                val intervalSec = authManager.getWebsitePollingIntervalSec().coerceAtLeast(5)
+
+                if (isEnabled && url.isNotBlank() && authManager.isWebsiteConnected()) {
+                    Log.d(TAG, "Starting periodic background website synchronization poll... targeting: $url")
+                    val tablesToSync = listOf("users", "products")
+                    for (table in tablesToSync) {
+                        try {
+                            val client = okhttp3.OkHttpClient.Builder()
+                                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                                .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                                .build()
+
+                            // Append table query parameter safely
+                            val parsedUri = url.toHttpUrlOrNull()
+                            if (parsedUri != null) {
+                                val httpUrl = parsedUri.newBuilder()
+                                    .addQueryParameter("table", table)
+                                    .addQueryParameter("action", "poll")
+                                    .build()
+
+                                val request = okhttp3.Request.Builder()
+                                    .url(httpUrl)
+                                    .addHeader("X-Publishable-Key", authManager.getWebsitePublishableKey())
+                                    .addHeader("X-Secret-Token", authManager.getWebsiteSecretToken())
+                                    .get()
+                                    .build()
+
+                                client.newCall(request).execute().use { response ->
+                                    if (response.isSuccessful) {
+                                        var bodyText = response.body?.string() ?: ""
+                                        if (bodyText.isNotBlank()) {
+                                            try {
+                                                val aesKey = authManager.getWebsiteDecryptionKey()
+                                                if (bodyText.trim().startsWith("{")) {
+                                                    val testObj = JSONObject(bodyText)
+                                                    if (testObj.has("encrypted_data")) {
+                                                        val encStr = testObj.getString("encrypted_data")
+                                                        val decStr = com.example.util.AesEncryptionHelper.decrypt(encStr, aesKey)
+                                                        if (decStr != encStr) {
+                                                            bodyText = decStr
+                                                            repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                                                level = "INFO",
+                                                                message = "Decrypt success on background poll table '$table' using symmetric AES key."
+                                                            ))
+                                                        }
+                                                    }
+                                                }
+
+                                                if (bodyText.trim().startsWith("[")) {
+                                                    val arr = JSONArray(bodyText)
+                                                    for (i in 0 until arr.length()) {
+                                                        val rowItem = arr.getJSONObject(i)
+                                                        val idStr = if (rowItem.has("id")) {
+                                                            rowItem.get("id").toString()
+                                                        } else {
+                                                            UUID.randomUUID().toString()
+                                                        }
+                                                        
+                                                        val hashed = com.example.util.SmsGatewaySecurityAndSyncUtils.hashSensitiveDataInPayload(rowItem.toString())
+                                                        val localized = com.example.util.SmsGatewaySecurityAndSyncUtils.downloadAndLocalizeImagesInPayload(applicationContext, hashed, repository)
+
+                                                        repository.insertDynamicRow(
+                                                            com.example.data.db.DynamicRowEntity(
+                                                                tableName = table,
+                                                                itemId = idStr,
+                                                                payload = localized
+                                                            )
+                                                        )
+                                                    }
+                                                    repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                                        level = "INFO",
+                                                        message = "Background poll auto-imported and secured ${arr.length()} items into '$table'."
+                                                    ))
+                                                } else if (bodyText.trim().startsWith("{")) {
+                                                    val obj = JSONObject(bodyText)
+                                                    val dataArray = obj.optJSONArray("data")
+                                                    if (dataArray != null) {
+                                                        for (i in 0 until dataArray.length()) {
+                                                            val rowItem = dataArray.getJSONObject(i)
+                                                            val idStr = if (rowItem.has("id")) rowItem.get("id").toString() else UUID.randomUUID().toString()
+                                                            
+                                                            val hashed = com.example.util.SmsGatewaySecurityAndSyncUtils.hashSensitiveDataInPayload(rowItem.toString())
+                                                            val localized = com.example.util.SmsGatewaySecurityAndSyncUtils.downloadAndLocalizeImagesInPayload(applicationContext, hashed, repository)
+
+                                                            repository.insertDynamicRow(
+                                                                com.example.data.db.DynamicRowEntity(
+                                                                    tableName = table,
+                                                                    itemId = idStr,
+                                                                    payload = localized
+                                                                )
+                                                            )
+                                                        }
+                                                        repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                                            level = "INFO",
+                                                            message = "Background poll auto-imported and secured ${dataArray.length()} items into '$table' from data envelope."
+                                                        ))
+                                                    } else {
+                                                        val idStr = if (obj.has("id")) obj.get("id").toString() else UUID.randomUUID().toString()
+                                                        
+                                                        val hashed = com.example.util.SmsGatewaySecurityAndSyncUtils.hashSensitiveDataInPayload(obj.toString())
+                                                        val localized = com.example.util.SmsGatewaySecurityAndSyncUtils.downloadAndLocalizeImagesInPayload(applicationContext, hashed, repository)
+
+                                                        repository.insertDynamicRow(
+                                                            com.example.data.db.DynamicRowEntity(
+                                                                tableName = table,
+                                                                itemId = idStr,
+                                                                payload = localized
+                                                            )
+                                                        )
+                                                        repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                                            level = "INFO",
+                                                            message = "Background poll auto-imported 1 item into '$table'."
+                                                        ))
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                                    level = "ERROR",
+                                                    message = "Background poll parsing failure for table '$table': ${e.message}"
+                                                ))
+                                            }
+                                        }
+                                    } else {
+                                        repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                            level = "WARNING",
+                                            message = "Background poll for '$table' returned status ${response.code}."
+                                        ))
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Network failure background website polling table $table: ${e.message}")
+                        }
+                    }
+                }
+                delay(intervalSec * 1000L)
+            }
+        }
+    }
+
     override fun onDestroy() {
         Log.d(TAG, "Service onDestroy")
         authManager.setGatewayRunning(false)
@@ -769,6 +1331,8 @@ class GatewayService : Service() {
         pollJob?.cancel()
         heartbeatJob?.cancel()
         statusUpdateJob?.cancel()
+        scheduledSmsJob?.cancel()
+        websitePollJob?.cancel()
         serviceJob.cancel()
 
         smsSentReceivers.forEach { (jobId, receiver) ->
@@ -792,6 +1356,50 @@ class GatewayService : Service() {
             // Ignore
         }
         releaseWakeLock()
+        stopLocalHttpServer()
         super.onDestroy()
+    }
+
+    private fun showLocalNotification(title: String, body: String, isSuccess: Boolean) {
+        try {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val outcomeChannelId = "sms_gateway_outcomes_channel"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                var channel = manager.getNotificationChannel(outcomeChannelId)
+                if (channel == null) {
+                    channel = NotificationChannel(
+                        outcomeChannelId,
+                        "SMS Gateway Alerts",
+                        NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "Alerts for sent and failed SMS jobs"
+                        enableLights(true)
+                        lightColor = if (isSuccess) android.graphics.Color.GREEN else android.graphics.Color.RED
+                        enableVibration(true)
+                    }
+                    manager.createNotificationChannel(channel)
+                }
+            }
+            
+            val iconRes = if (isSuccess) {
+                android.R.drawable.ic_dialog_info
+            } else {
+                android.R.drawable.ic_dialog_alert
+            }
+            
+            val builder = NotificationCompat.Builder(this, outcomeChannelId)
+                .setSmallIcon(iconRes)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(Notification.DEFAULT_ALL)
+                .setAutoCancel(true)
+            
+            val notificationId = (System.currentTimeMillis() % 100000).toInt() + (if (isSuccess) 100000 else 200000)
+            manager.notify(notificationId, builder.build())
+        } catch (e: Exception) {
+            Log.e(TAG, "Error showing outcome local notification: ${e.message}")
+        }
     }
 }
