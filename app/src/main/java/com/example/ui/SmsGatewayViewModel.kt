@@ -176,9 +176,14 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
         // Run security diagnostics
         refreshSecurityAudit()
 
-        // Seed default notification audits if empty
+        // Seed default notification audits and hub logs if empty
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                if (repository.allHubLogs.first().isEmpty()) {
+                    repository.insertHubLog(com.example.data.db.HubEventLogEntity(level = "INFO", message = "Bi-directional integration hub engine loaded successfully."))
+                    repository.insertHubLog(com.example.data.db.HubEventLogEntity(level = "INFO", message = "Listening for incoming database synchronization requests on http://localhost:8085/api/sync."))
+                    repository.insertHubLog(com.example.data.db.HubEventLogEntity(level = "WARNING", message = "No active webhook endpoint has been validated for remote publishing yet."))
+                }
                 if (repository.allNotificationAudits.first().isEmpty()) {
                     repository.insertNotificationAudit(
                         com.example.data.db.NotificationAuditEntity(
@@ -605,11 +610,22 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
         if (url.isBlank()) {
             websiteValidationState.value = "Error: Website URL is blank"
             websiteValidationSuggestions.value = "Please enter a valid website endpoint URL (e.g., https://my-store.com/api/simgate)"
+            insertHubLog("ERROR", "Handshake skipped: Endpoint URL is blank.")
             return
         }
 
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            websiteValidationState.value = "Error: Invalid URL scheme"
+            websiteValidationSuggestions.value = "Scheme Missing/Malformed: Webhook endpoint URL must start with either 'http://' or 'https://'. Please fix the URL protocol prefix."
+            insertHubLog("ERROR", "Handshake skipped: Invalid URL scheme protocol.")
+            return
+        }
+
+        val isLocalHost = url.contains("localhost") || url.contains("127.0.0.1")
+
         websiteValidationState.value = "validating"
         websiteValidationSuggestions.value = null
+        insertHubLog("INFO", "Initiating handshake validation for endpoint URL: $url")
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -621,6 +637,10 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
                 val testPayload = JSONObject().apply {
                     put("type", "handshake")
                     put("message", "Verify connection from SimGate Gateway app")
+                    put("publishable_id", websitePublishableKey.value)
+                    put("id", websitePublishableKey.value)
+                    put("secret_signature", websiteSecretToken.value)
+                    put("secret", websiteSecretToken.value)
                 }
 
                 val body = okhttp3.RequestBody.create(
@@ -636,22 +656,45 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
                     .build()
 
                 client.newCall(request).execute().use { response ->
+                    val respStr = response.body?.string() ?: ""
+                    var isPayloadValid = true
+                    var serverErrorDetail = ""
+                    try {
+                        if (respStr.isNotBlank()) {
+                            val json = JSONObject(respStr)
+                            if (json.has("success") && !json.getBoolean("success")) {
+                                isPayloadValid = false
+                                serverErrorDetail = json.optString("message", "Validation rejected by server")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // Non-json response, proceed with HTTP status code validation
+                    }
+
                     withContext(Dispatchers.Main) {
-                        if (response.isSuccessful) {
+                        if (response.isSuccessful && isPayloadValid) {
                             authManager.setWebsiteConnected(true)
                             websiteConnected.value = true
                             websiteValidationState.value = "connected"
                             websiteValidationSuggestions.value = "Successfully authenticated and connected!"
+                            insertHubLog("INFO", "Handshake connection validation succeeded. Secure credentials signature token accepted.")
                         } else {
                             authManager.setWebsiteConnected(false)
                             websiteConnected.value = false
                             val code = response.code
-                            websiteValidationState.value = "Failed: Server returned HTTP status code $code"
-                            websiteValidationSuggestions.value = when (code) {
-                                401, 403 -> "Unauthorized: Ensure your website's plugin or receiver matches your publishable key and secret token perfectly."
-                                404 -> "Endpoint not found: Check if the path part of your URL is misspelled or the handler function is disabled."
-                                500, 502, 503, 504 -> "Internal Server Error: The website's server crashed or timed out. Check website logs/PHP error log."
-                                else -> "Invalid response code: Make sure the endpoint accepts POST requests and outputs HTTP code 200 on success."
+                            if (!isPayloadValid) {
+                                websiteValidationState.value = "Failed: Server endpoint validation mismatch"
+                                websiteValidationSuggestions.value = "Server Handshake Aborted:\n'$serverErrorDetail'.\n\nPossible Fixes needed:\n1. Verify your backend controller logic is matching and comparing the Publishable ID and Secret Token perfectly.\n2. Ensure your backend returns response JSON with '\"success\": true'."
+                                insertHubLog("ERROR", "Handshake connection rejected by endpoint: $serverErrorDetail")
+                            } else {
+                                websiteValidationState.value = "Failed: Server returned HTTP status code $code"
+                                websiteValidationSuggestions.value = when (code) {
+                                    401, 403 -> "Possible Fixes needed:\n1. Ensure your website's webhook plugin or custom script validates X-Publishable-Key header and publishable_id payload perfectly.\n2. Ensure X-Secret-Token header matches secret_signature payload."
+                                    404 -> "Possible Fixes needed:\n1. Endpoint path not found. Verify the URL is spelled correctly on your web server.\n2. Check if your REST API controller is fully activated and registered."
+                                    500, 502, 503, 504 -> "Possible Fixes needed:\n1. Internal Server Error. The web server script had an unhandled exception or database error.\n2. Inquire server PHP logs or Apache/Nginx error logs to find the backend code crash location."
+                                    else -> "Possible Fixes needed:\n1. Make sure your server endpoint accepts custom POST headers.\n2. Implement a responsive HTTP status code 200 return code on success."
+                                }
+                                insertHubLog("ERROR", "Handshake failed: Server responded with HTTP status code $code.")
                             }
                         }
                     }
@@ -669,9 +712,12 @@ class SmsGatewayViewModel(application: Application) : AndroidViewModel(applicati
                             "Request Timeout: The website took too long to reply. Ensure the server is online and port 80/443 is clear."
                         errorMsg.contains("resolve", ignoreCase = true) -> 
                             "Host unresolved: Check domain spelling or connectivity status on your Android device."
+                        isLocalHost ->
+                            "Android Localhost Loopback issue: Android localhost (127.0.0.1) points to the device itself. If the webhook server runs on your host development computer, update 'localhost' to your computer's local Wi-Fi IP address or utilize '10.0.2.2' within the Android Emulator environment."
                         else -> 
-                            "Connection refused or unreachable. Suggestion: Verify if your server is running a firewall (e.g. ModSecurity, Cloudflare) blocking incoming POST or custom headers."
+                            "Connection refused or unreachable. Possible Fixes needed:\n1. Check if the server is hosted behind a firewall (e.g. ModSecurity, Cloudflare) that blocks custom headers or POST events.\n2. Ensure the port is correctly open and listening on public networks."
                     }
+                    insertHubLog("ERROR", "Handshake connectivity crashed: $errorMsg")
                 }
             }
         }

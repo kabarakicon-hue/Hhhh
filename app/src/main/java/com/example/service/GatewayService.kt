@@ -185,7 +185,21 @@ class GatewayService : Service() {
 
         // Create and start foreground with notification
         val notification = buildServiceNotification(if (hasCreds) "Connecting to server..." else "Local-Only Scheduler Active")
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
         // Perform initial connect call if credentials exist
         if (hasCreds) {

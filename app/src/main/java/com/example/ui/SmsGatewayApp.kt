@@ -780,6 +780,12 @@ fun DashboardScreen(viewModel: SmsGatewayViewModel, onViewAllHistory: () -> Unit
     val selectedSimPref by viewModel.selectedSimPref.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    val notificationAudits by viewModel.allNotificationAudits.collectAsStateWithLifecycle(emptyList())
+
+    var showDrawer by remember { mutableStateOf(false) }
+    var showNotificationsAudit by remember { mutableStateOf(false) }
+    var selectedCategoryFilter by remember { mutableStateOf("ALL") }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -792,7 +798,7 @@ fun DashboardScreen(viewModel: SmsGatewayViewModel, onViewAllHistory: () -> Unit
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = {}) {
+            IconButton(onClick = { showDrawer = true }) {
                 Icon(Icons.Default.Menu, contentDescription = "Drawer menu", tint = LightText)
             }
             Spacer(modifier = Modifier.width(8.dp))
@@ -801,16 +807,26 @@ fun DashboardScreen(viewModel: SmsGatewayViewModel, onViewAllHistory: () -> Unit
                 Text("Your phone is running as SMS Gateway", fontSize = 11.sp, color = SoftGray)
             }
             Box {
-                IconButton(onClick = {}) {
+                IconButton(onClick = { showNotificationsAudit = true }) {
                     Icon(Icons.Default.Notifications, contentDescription = "Alert notifications", tint = LightText)
                 }
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(Color.Red, CircleShape)
-                        .align(Alignment.TopEnd)
-                        .offset(x = (-8).dp, y = (8).dp)
-                )
+                if (notificationAudits.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .background(Color.Red, CircleShape)
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-2).dp, y = (2).dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = notificationAudits.size.toString(),
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
 
@@ -1311,6 +1327,448 @@ fun DashboardScreen(viewModel: SmsGatewayViewModel, onViewAllHistory: () -> Unit
 
         Spacer(modifier = Modifier.height(8.dp))
         LegalSection(viewModel = viewModel)
+    }
+
+    if (showDrawer) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showDrawer = false }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.92f)
+                    .padding(vertical = 10.dp),
+                colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, SlateOutline)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = EmeraldPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "About SimGate Launcher",
+                                color = LightText,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        IconButton(onClick = { showDrawer = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close drawer", tint = SoftGray)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Scrollable Info content
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Section Content: About
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("About the App", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "SimGate is a high-performance hardware gateway synchronization client. It acts as an intelligence bridge that safely links physical Android LTE/SMS cellular transceivers directly with modern cloud-automated or self-hosted API endpoints.",
+                                color = LightText,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+
+                        // Section Content: How the app runs
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("How the App Runs", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "SimGate utilizes dual polling loops and long-lived WebSocket triggers together with native cell-tower broadcast listening. It performs persistent hardware checks to dispatch and sync SMS threads efficiently in the background, minimizing CPU and battery consumption.",
+                                color = LightText,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+
+                        // Section Content: App Features
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Features Inside the App", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            val featuresList = listOf(
+                                "Real-time Two-Way SMS API Tunneling Engine",
+                                "Dual-SIM (Subscriber Carrier Card Slot) Native Selection",
+                                "Scheduled Delay Campaigns & Broadcast Queuing",
+                                "Intelligent Local AI Dispatch Assistant"
+                            )
+                            featuresList.forEach { feat ->
+                                Row(verticalAlignment = Alignment.Top, modifier = Modifier.padding(start = 4.dp)) {
+                                    Text("• ", color = EmeraldPrimary, fontSize = 11.sp)
+                                    Text(feat, color = SoftGray, fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        // Section Content: Future implementations for full developers (COMING SOON)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Future Dev Roadmap", color = EmeraldPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Planned integrations for complete standalone developers:", color = SoftGray, fontSize = 10.sp)
+                            
+                            val roadmaps = listOf(
+                                "E2E AES Payload Encryption (Secure trust Handshake)",
+                                "Prometheus & Grafana Telemetry Metrics Exporter API",
+                                "Webhook Hub integration support (Zapier/Make.com triggers)",
+                                "Advanced Sleep State Battery Resilience protocols"
+                            )
+                            roadmaps.forEach { rdm ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0x15FFFFFF), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                ) {
+                                    Text(rdm, color = LightText, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                                    Text(
+                                        "Coming Soon", 
+                                        color = EmeraldPrimary, 
+                                        fontSize = 8.sp, 
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier
+                                            .background(Color(0x3010B981), RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Section Content: Project Github Repository Releases
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x2010B981), RoundedCornerShape(8.dp))
+                                .border(BorderStroke(1.dp, Color(0x3010B981)), RoundedCornerShape(8.dp))
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("Official Releases Feed Server", color = EmeraldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Track updates, view binaries, or compile source branches directly from the official repository releases:", color = LightText, fontSize = 10.sp)
+                            
+                            val repoUrl = "https://github.com/ckiptoo051-lab/Simgate/releases"
+                            
+                            val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                            val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+                            
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { uriHandler.openUri(repoUrl) }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Launch,
+                                    contentDescription = "Release Page Link",
+                                    tint = EmeraldPrimary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = repoUrl,
+                                    color = EmeraldPrimary,
+                                    fontSize = 10.sp,
+                                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            
+                            Button(
+                                onClick = {
+                                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(repoUrl))
+                                    Toast.makeText(context, "Link copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                shape = RoundedCornerShape(6.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy Link",
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(10.dp)
+                                    )
+                                    Text("Copy URL", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = { showDrawer = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = SlateOutline),
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Close About Panel", color = LightText, fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showNotificationsAudit) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = { showNotificationsAudit = false }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.85f)
+                    .padding(vertical = 10.dp),
+                colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, SlateOutline)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = null,
+                                tint = EmeraldPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Notification Audits",
+                                color = LightText,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        IconButton(onClick = { showNotificationsAudit = false }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close audits", tint = SoftGray)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Buttons/Logs filter chips row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("ALL", "CONNECTION", "ERROR", "CRASH", "SUGGESTION").forEach { category ->
+                            val isSelected = selectedCategoryFilter == category
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (isSelected) EmeraldPrimary.copy(0.2f) else Color.Transparent,
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                    .border(
+                                        BorderStroke(1.dp, if (isSelected) EmeraldPrimary else SlateOutline),
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable { selectedCategoryFilter = category }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = category.lowercase().replaceFirstChar { it.uppercase() },
+                                    color = if (isSelected) EmeraldPrimary else SoftGray,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Inner list or empty state
+                    val filteredAudits = notificationAudits.filter {
+                        selectedCategoryFilter == "ALL" || it.category.equals(selectedCategoryFilter, ignoreCase = true)
+                    }
+
+                    if (filteredAudits.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = "App running clean icon",
+                                tint = SoftGray,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "No notification audits found.",
+                                color = LightText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                if (selectedCategoryFilter == "ALL") "All logs clean! The hardware gateway service is operating properly." 
+                                else "No logs recorded for filter '$selectedCategoryFilter'.",
+                                color = SoftGray,
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(horizontal = 24.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    } else {
+                        // Scrollable List
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(filteredAudits) { audit ->
+                                val (bgCol, textCol, categoryIcon) = when (audit.category.uppercase()) {
+                                    "CONNECTION" -> Triple(Color(0x1510B981), Color(0xFF10B981), Icons.Default.Wifi)
+                                    "ERROR" -> Triple(Color(0x15EF4444), Color(0xFFEF4444), Icons.Default.Warning)
+                                    "CRASH" -> Triple(Color(0x15A855F7), Color(0xFFA855F7), Icons.Default.Cancel)
+                                    "SUGGESTION" -> Triple(Color(0x153B82F6), Color(0xFF3B82F6), Icons.Default.Info)
+                                    else -> Triple(Color(0x159CA3AF), Color(0xFF9CA3AF), Icons.Default.Info)
+                                }
+
+                                val timeStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+                                    .format(java.util.Date(audit.timestamp))
+
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+                                    border = BorderStroke(1.dp, bgCol.copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(bgCol)
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(textCol.copy(0.12f), CircleShape)
+                                                .padding(6.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = categoryIcon,
+                                                contentDescription = null,
+                                                tint = textCol,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = audit.category.uppercase(),
+                                                    color = textCol,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = timeStr,
+                                                    color = SoftGray,
+                                                    fontSize = 8.sp
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = audit.title,
+                                                color = LightText,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = audit.message,
+                                                color = SoftGray,
+                                                fontSize = 10.sp,
+                                                lineHeight = 14.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Buttons (Clear all & Close)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { 
+                                viewModel.clearNotificationAudits()
+                                Toast.makeText(context, "Notification Audit logs successfully cleared.", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0x20EF4444)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Clear All Audits",
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Clear All", color = Color(0xFFEF4444), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { showNotificationsAudit = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Done", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -3555,9 +4013,12 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
     var showRevokeConfirm by remember { mutableStateOf(false) }
     var selectedRowForInspect by remember { mutableStateOf<com.example.data.db.DynamicRowEntity?>(null) }
     var isTableFullScreen by remember { mutableStateOf(false) }
+    var isTableExpanded by remember { mutableStateOf(false) }
     var selectedTableFilter by remember { mutableStateOf("all") } // "all", "users", "products"
     var showSetupGuide by remember { mutableStateOf(false) }
     var showDocFullScreen by remember { mutableStateOf(false) }
+    var isManualExpanded by remember { mutableStateOf(false) }
+    var isLogsExpanded by remember { mutableStateOf(false) }
     var showLogsFullScreen by remember { mutableStateOf(false) }
     
     // Image selection progress transient animations
@@ -4279,30 +4740,53 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
 
     // FULL SCREEN TABLES DIALOG (with filter / search and inspection triggers)
     if (isTableFullScreen) {
-        Dialog(onDismissRequest = { isTableFullScreen = false }) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.9f),
-                colors = CardDefaults.cardColors(containerColor = SlateNavCard),
-                border = BorderStroke(1.dp, SlateOutline),
-                shape = RoundedCornerShape(14.dp)
+        androidx.compose.runtime.key(isTableExpanded) {
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { 
+                    isTableFullScreen = false 
+                    isTableExpanded = false
+                },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // Header
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Default.Fullscreen, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(20.dp))
-                            Text("Full Table Backup Explorer", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LightText)
+                Card(
+                    modifier = if (isTableExpanded) {
+                        Modifier.fillMaxSize().padding(12.dp)
+                    } else {
+                        Modifier
+                            .fillMaxWidth(0.95f)
+                            .fillMaxHeight(0.9f)
+                    },
+                    colors = CardDefaults.cardColors(containerColor = SlateNavCard),
+                    border = BorderStroke(1.dp, SlateOutline),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        // Header
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Default.Fullscreen, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(20.dp))
+                                Text("Full Table Backup Explorer", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = LightText)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { isTableExpanded = !isTableExpanded }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Fullscreen,
+                                        contentDescription = "Toggle full screen table view",
+                                        tint = if (isTableExpanded) EmeraldPrimary else SoftGray
+                                    )
+                                }
+                                IconButton(onClick = { 
+                                    isTableFullScreen = false 
+                                    isTableExpanded = false
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close full screen", tint = SoftGray)
+                                }
+                            }
                         }
-                        IconButton(onClick = { isTableFullScreen = false }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close full screen", tint = SoftGray)
-                        }
-                    }
 
                     // Filters Toolbar
                     Row(
@@ -4393,6 +4877,7 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                 }
             }
         }
+    }
     }
 
     // CHUNK COMPARTMENT IMAGE COMPRESSION & DETAILS INSPECT DIALOG
@@ -4682,11 +5167,22 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
 
         // FULL-SCREEN DOCUMENTATION GUIDE OVERLAY
         if (showDocFullScreen) {
-            androidx.compose.ui.window.Dialog(onDismissRequest = { showDocFullScreen = false }) {
+            androidx.compose.runtime.key(isManualExpanded) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = { 
+                        showDocFullScreen = false 
+                        isManualExpanded = false
+                    },
+                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+                ) {
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.9f),
+                    modifier = if (isManualExpanded) {
+                        Modifier.fillMaxSize().padding(12.dp)
+                    } else {
+                        Modifier
+                            .fillMaxWidth(0.95f)
+                            .fillMaxHeight(0.9f)
+                    },
                     colors = CardDefaults.cardColors(containerColor = SlateNavCard),
                     border = BorderStroke(1.dp, SlateOutline),
                     shape = RoundedCornerShape(14.dp)
@@ -4702,12 +5198,24 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Default.Book, contentDescription = null, tint = EmeraldPrimary)
                                 Text("Web Integration Manual", color = LightText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
-                            IconButton(onClick = { showDocFullScreen = false }) {
-                                Icon(Icons.Default.Close, contentDescription = "Close documentation panel", tint = SoftGray)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { isManualExpanded = !isManualExpanded }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Fullscreen,
+                                        contentDescription = "Toggle full screen manual view",
+                                        tint = if (isManualExpanded) EmeraldPrimary else SoftGray
+                                    )
+                                }
+                                IconButton(onClick = { 
+                                    showDocFullScreen = false 
+                                    isManualExpanded = false
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close documentation panel", tint = SoftGray)
+                                }
                             }
                         }
 
@@ -4737,10 +5245,26 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                             lineHeight = 15.sp
                         )
 
-                        // Section 3: PHP Endpoint implementation (including symmetric encryption/decryption)
-                        Text("3. PHP Security Handshake Endpoint", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
+                        // Section 3: Step-by-Step Backend Integration Procedure
+                        Text("3. Handshake & Webhook Integration Procedure", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
                         Text(
-                            text = "To deploy full bidirectional encryption, configure a controller on your website that implements a handshake utilizing the app's keys & decrypts symmetric payloads:",
+                            text = "To allow SimGate to validate your website endpoint successfully, your backend server must perform a simple secure handshake validation. Follow this procedure step-by-step:\n\n" +
+                                    "Step A. Receive Request Data:\nSimGate triggers a POST request to your webhook URL carrying HTTP headers or request payload attributes.\n\n" +
+                                    "Step B. Match Security Keys:\nVerify if the incoming data matches your unique credentials:\n" +
+                                    " • Publishable ID: '$pubKey'\n" +
+                                    " • Secret Token: '$secToken'\n" +
+                                    "Check both POST payload tags ('publishable_id' or 'id') and HTTP headers ('X-Publishable-Key').\n\n" +
+                                    "Step C. Return Validation Success Response:\n" +
+                                    "If credentials match successfully, return an HTTP status code 200 along with the exact JSON output: {\"success\": true}.",
+                            fontSize = 11.sp,
+                            color = SoftGray,
+                            lineHeight = 15.sp
+                        )
+
+                        // Section 4: PHP Security Handshake Endpoint blueprint
+                        Text("4. PHP Security Handshake Blueprint", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
+                        Text(
+                            text = "A complete PHP controller that parses headers/payloads, performs the required validation cheeks, and decrypts payloads via AES-128-ECB:",
                             fontSize = 11.sp,
                             color = SoftGray,
                             lineHeight = 15.sp
@@ -4749,22 +5273,32 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                         val aesKeyVal = viewModel.getWebsiteDecryptionKey()
                         val fullPhpBlueprint = """
     <?php
-    // simgate.php - SimGate Endpoint Controller Blueprint
+    // simgate.php - SimGate Security Webhook Controller
     ${"$"}_pubKey = ${"$"}_SERVER['HTTP_X_PUBLISHABLE_KEY'] ?? '';
     ${"$"}_secToken = ${"$"}_SERVER['HTTP_X_SECRET_TOKEN'] ?? '';
 
-    // 1. Authenticate Request Credentials
-    if (${"$"}_pubKey !== '$pubKey' || ${"$"}_secToken !== '$secToken') {
-        http_response_code(401);
-        die(json_encode(["success" => false, "message" => "Unauthorized Gateway Credentials!"]));
+    ${"$"}_rawBody = file_get_contents('php://input');
+    ${"$"}_payload = json_decode(${"$"}_rawBody, true) ?: [];
+
+    // 1. Extract body attributes as fallback
+    if (empty(${"$"}_pubKey)) {
+        ${"$"}_pubKey = ${"$"}_payload['publishable_id'] ?? ${"$"}_payload['id'] ?? '';
+    }
+    if (empty(${"$"}_secToken)) {
+        ${"$"}_secToken = ${"$"}_payload['secret_signature'] ?? ${"$"}_payload['secret'] ?? '';
     }
 
-    ${"$"}_rawBody = file_get_contents('php://input');
-    ${"$"}_payload = json_decode(${"$"}_rawBody, true);
+    // 2. Strict Credentials Match Validation
+    if (${"$"}_pubKey !== '$pubKey' || ${"$"}_secToken !== '$secToken') {
+        http_response_code(401);
+        die(json_encode([
+            "success" => false, 
+            "message" => "Unauthorized: Security validation credentials signature mismatch."
+        ]));
+    }
 
-    // 2. Symmetric Decryption Mechanism (AES-128-ECB)
+    // 3. Option: Decrypt encrypted JSON backups (AES-128-ECB)
     ${"$"}_aesKey = '$aesKeyVal';
-
     if (isset(${"$"}_payload['encrypted_data'])) {
         ${"$"}_encryptedData = ${"$"}_payload['encrypted_data'];
         ${"$"}_decryptedRaw = openssl_decrypt(
@@ -4778,10 +5312,10 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
         }
     }
 
-    // 3. Respond with Handshake Confirm
+    // 4. Return Validation Success Response
     echo json_encode([
         "success" => true,
-        "received_payload" => ${"$"}_payload,
+        "mode" => "handshake_success",
         "timestamp" => time()
     ]);
     ?>""".trimIndent()
@@ -4799,14 +5333,93 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                         ) {
                             Column {
                                 Text(
-                                    text = "<?php\n// simgate.php\n// Click card to COPY full secure controller blueprint...",
+                                    text = "<?php\n// simgate.php\n// Click card to COPY full php blueprints...",
                                     color = SoftGray,
                                     fontSize = 9.sp,
                                     fontFamily = FontFamily.Monospace
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = fullPhpBlueprint.take(450) + "\n\n... [TAP TO COPY REMAINING DIRECTIVE CODE]",
+                                    text = fullPhpBlueprint.take(350) + "\n\n... [TAP TO COPY FULL SECURE CONTROLLER PHP CODE]",
+                                    color = EmeraldPrimary,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    lineHeight = 11.sp
+                                )
+                            }
+                        }
+
+                        // Section 5: Node.js Security Handshake Endpoint blueprint
+                        Text("5. Node.js (Express) Security Handshake Blueprint", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
+                        Text(
+                            text = "Configure this simple endpoint controller on your Express web server to accept incoming handshake actions securely:",
+                            fontSize = 11.sp,
+                            color = SoftGray,
+                            lineHeight = 15.sp
+                        )
+
+                        val fullNodeBlueprint = """
+    // Node.js Express SimGate webhook controller
+    const express = require('express');
+    const crypto = require('crypto');
+    const app = express();
+    app.use(express.json());
+
+    app.post('/api/simgate', (req, res) => {
+        // 1. Extract values from Headers or Body properties
+        const pubKey = req.headers['x-publishable-key'] || req.body.publishable_id || req.body.id;
+        const secToken = req.headers['x-secret-token'] || req.body.secret_signature || req.body.secret;
+
+        // 2. Validate Credentials against your specific credentials
+        if (pubKey !== '$pubKey' || secToken !== '$secToken') {
+            return res.status(401).json({
+                success: false,
+                message: 'Unauthorized: Gateway token signatures mismatch!'
+            });
+        }
+
+        // 3. Option: Decrypt symmetric properties
+        const aesKey = '$aesKeyVal';
+        if (req.body.encrypted_data) {
+            try {
+                const decipher = crypto.createDecipheriv('aes-128-ecb', aesKey, null);
+                let decrypted = decipher.update(req.body.encrypted_data, 'base64', 'utf8');
+                decrypted += decipher.final('utf8');
+                req.body.decrypted_data = JSON.parse(decrypted);
+            } catch (err) {
+                console.error('Decryption failed:', err.message);
+            }
+        }
+
+        // 4. Return correct success payload and 200 OK
+        return res.status(200).json({
+            success: true,
+            message: 'Handshake connection verified successfully!'
+        });
+    });
+                        """.trimIndent()
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF070A13), RoundedCornerShape(8.dp))
+                                .border(1.dp, SlateOutline, RoundedCornerShape(8.dp))
+                                .clickable {
+                                    clipboard.setText(AnnotatedString(fullNodeBlueprint))
+                                    Toast.makeText(context, "Node.js Webhook Copied!", Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(10.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    text = "// node-express.js\n// Click card to COPY Node.js/Express blueprint...",
+                                    color = SoftGray,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = fullNodeBlueprint.take(350) + "\n\n... [TAP TO COPY FULL NODE.JS CONTROLLER CODE]",
                                     color = EmeraldPrimary,
                                     fontSize = 9.sp,
                                     fontFamily = FontFamily.Monospace,
@@ -4816,7 +5429,10 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                         }
 
                         Button(
-                            onClick = { showDocFullScreen = false },
+                            onClick = { 
+                                showDocFullScreen = false 
+                                isManualExpanded = false
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                             modifier = Modifier.fillMaxWidth().height(36.dp),
                             shape = RoundedCornerShape(6.dp)
@@ -4827,14 +5443,26 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                 }
             }
         }
+        }
 
         // FULL-SCREEN LOGS OVERLAY (Terminal Emulator)
         if (showLogsFullScreen) {
-            androidx.compose.ui.window.Dialog(onDismissRequest = { showLogsFullScreen = false }) {
+            androidx.compose.runtime.key(isLogsExpanded) {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = { 
+                        showLogsFullScreen = false 
+                        isLogsExpanded = false
+                    },
+                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+                ) {
                 Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.85f),
+                    modifier = if (isLogsExpanded) {
+                        Modifier.fillMaxSize().padding(12.dp)
+                    } else {
+                        Modifier
+                            .fillMaxWidth(0.95f)
+                            .fillMaxHeight(0.85f)
+                    },
                     colors = CardDefaults.cardColors(containerColor = SlateNavCard),
                     border = BorderStroke(1.dp, SlateOutline),
                     shape = RoundedCornerShape(14.dp)
@@ -4848,12 +5476,24 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Default.Code, contentDescription = null, tint = Color(0xFFFBBF24))
                                 Text("System Log Terminal", color = LightText, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
-                            IconButton(onClick = { showLogsFullScreen = false }) {
-                                Icon(Icons.Default.Close, contentDescription = "Close logs panel", tint = SoftGray)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { isLogsExpanded = !isLogsExpanded }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Fullscreen,
+                                        contentDescription = "Toggle full screen logs view",
+                                        tint = if (isLogsExpanded) EmeraldPrimary else SoftGray
+                                    )
+                                }
+                                IconButton(onClick = { 
+                                    showLogsFullScreen = false 
+                                    isLogsExpanded = false
+                                }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close logs panel", tint = SoftGray)
+                                }
                             }
                         }
 
@@ -4865,37 +5505,54 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                                 .border(1.dp, SlateOutline, RoundedCornerShape(8.dp))
                                 .padding(10.dp)
                         ) {
-                            androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                items(hubLogs) { log ->
-                                    val color = when (log.level.uppercase()) {
-                                        "ERROR" -> Color(0xFFEF4444)
-                                        "WARNING" -> Color(0xFFF59E0B)
-                                        else -> Color(0xFF10B981)
-                                    }
-                                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
-                                    val timeStr = sdf.format(java.util.Date(log.timestamp))
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.Top
-                                    ) {
-                                        Text("[$timeStr]", color = SoftGray, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
-                                        Box(
-                                            modifier = Modifier
-                                                .background(color.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
-                                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                                        ) {
-                                            Text(log.level.uppercase(), color = color, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            if (hubLogs.isEmpty()) {
+                                androidx.compose.ui.Alignment.Center
+                                Box(
+                                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                                    contentAlignment = androidx.compose.ui.Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "No active hub synchronization log events recorded yet.\n\nPolling queries or external remote API payloads matching security keys will automatically list real-time diagnostic output here.",
+                                        color = SoftGray,
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                            } else {
+                                androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(hubLogs) { log ->
+                                        val color = when (log.level.uppercase()) {
+                                            "ERROR" -> Color(0xFFEF4444)
+                                            "WARNING" -> Color(0xFFF59E0B)
+                                            else -> Color(0xFF10B981)
                                         }
-                                        Text(
-                                            text = log.message,
-                                            color = LightText,
-                                            fontSize = 10.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            lineHeight = 13.sp,
-                                            modifier = Modifier.weight(1f)
-                                        )
+                                        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                                        val timeStr = sdf.format(java.util.Date(log.timestamp))
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.Top
+                                        ) {
+                                            Text("[$timeStr]", color = SoftGray, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(color.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                                            ) {
+                                                Text(log.level.uppercase(), color = color, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            Text(
+                                                text = log.message,
+                                                color = LightText,
+                                                fontSize = 10.sp,
+                                                fontFamily = FontFamily.Monospace,
+                                                lineHeight = 13.sp,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -4917,7 +5574,10 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                                 Text("Flush Logs", color = Color(0xFFEF4444), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                             Button(
-                                onClick = { showLogsFullScreen = false },
+                                onClick = { 
+                                    showLogsFullScreen = false 
+                                    isLogsExpanded = false
+                                },
                                 colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary),
                                 modifier = Modifier.weight(1f).height(36.dp),
                                 shape = RoundedCornerShape(6.dp)
@@ -4928,6 +5588,7 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                     }
                 }
             }
+        }
         }
     }
 }

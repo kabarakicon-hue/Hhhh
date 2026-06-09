@@ -284,8 +284,13 @@ fun AiRootScreen(viewModel: SmsGatewayViewModel) {
                             textInput = ""
                             focusManager.clearFocus()
                             scope.launch {
-                                submitUserCommand(userText, apiKey, model, viewModel, messages) { updated ->
-                                    messages = updated
+                                isGenerating = true
+                                try {
+                                    submitUserCommand(userText, apiKey, model, viewModel, messages) { updated ->
+                                        messages = updated
+                                    }
+                                } finally {
+                                    isGenerating = false
                                 }
                             }
                         }
@@ -299,8 +304,13 @@ fun AiRootScreen(viewModel: SmsGatewayViewModel) {
                             textInput = ""
                             focusManager.clearFocus()
                             scope.launch {
-                                submitUserCommand(userText, apiKey, model, viewModel, messages) { updated ->
-                                    messages = updated
+                                isGenerating = true
+                                try {
+                                    submitUserCommand(userText, apiKey, model, viewModel, messages) { updated ->
+                                        messages = updated
+                                    }
+                                } finally {
+                                    isGenerating = false
                                 }
                             }
                         }
