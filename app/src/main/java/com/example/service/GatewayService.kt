@@ -110,7 +110,8 @@ class GatewayService : Service() {
     private var statusUpdateJob: Job? = null
     private var scheduledSmsJob: Job? = null
     private var websitePollJob: Job? = null
-    private var localHttpServer: com.sun.net.httpserver.HttpServer? = null
+    private var localServerSocket: java.net.ServerSocket? = null
+    private var localHttpServerThread: Thread? = null
 
     // Broadcaster list of registered SMS receivers
     private val smsSentReceivers = mutableMapOf<String, BroadcastReceiver>()
@@ -818,7 +819,7 @@ class GatewayService : Service() {
         val channelDescription = if (_serviceState.value.isConnected) "Connected • SMS Gateway Online" else "Offline • SMS Gateway Reconnecting"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher_round) // Using actual system app icon
+            .setSmallIcon(R.drawable.ic_launcher_foreground) // Using standard vector drawable, never mipmap
             .setContentTitle("SMS Gateway Running")
             .setContentText(contentText)
             .setSubText(channelDescription)
@@ -826,8 +827,8 @@ class GatewayService : Service() {
             .setCategory(Notification.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(openAppPI)
-            .addAction(R.drawable.ic_launcher_foreground, "Open App", openAppPI) // Using foreground icon placeholder helper
-            .addAction(R.drawable.ic_launcher_background, "Stop Service", stopPI)
+            .addAction(android.R.drawable.ic_menu_view, "Open App", openAppPI) // Using reliable system icons
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Service", stopPI)
             .build()
     }
 
@@ -1024,171 +1025,241 @@ class GatewayService : Service() {
     private fun startLocalHttpServer() {
         try {
             stopLocalHttpServer()
-            val server = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress(8085), 0)
-            server.createContext("/api/sync") { exchange ->
-                var responseCode = 200
-                var responseText = ""
+            val serverSocket = java.net.ServerSocket(8085)
+            localServerSocket = serverSocket
+            
+            val thread = Thread {
                 try {
-                    val method = exchange.requestMethod
-                    val authHeaderKey = exchange.requestHeaders.getFirst("X-Publishable-Key") ?: ""
-                    val authHeaderToken = exchange.requestHeaders.getFirst("X-Secret-Token") ?: ""
-
-                    val localPk = authManager.getWebsitePublishableKey()
-                    val localSk = authManager.getWebsiteSecretToken()
-
-                    if (authHeaderKey != localPk || authHeaderToken != localSk) {
-                        responseCode = 401
-                        responseText = "{\"success\":false,\"error\":\"Unauthorized credentials mapping failed.\"}"
-                    } else if (method == "POST") {
-                        val body = exchange.requestBody.bufferedReader().use { it.readText() }
-                        var json = JSONObject(body)
-                        val aesKey = authManager.getWebsiteDecryptionKey()
-                        
-                        if (json.has("encrypted_data")) {
-                            try {
-                                val encStr = json.getString("encrypted_data")
-                                val decStr = com.example.util.AesEncryptionHelper.decrypt(encStr, aesKey)
-                                if (decStr != encStr && decStr.startsWith("{")) {
-                                    json = JSONObject(decStr)
-                                    serviceScope.launch(Dispatchers.IO) {
-                                        repository.insertHubLog(com.example.data.db.HubEventLogEntity(
-                                            level = "INFO",
-                                            message = "Received encrypted payload. Successfully decrypted using symmetric AES key."
-                                        ))
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                serviceScope.launch(Dispatchers.IO) {
-                                    repository.insertHubLog(com.example.data.db.HubEventLogEntity(
-                                        level = "ERROR",
-                                        message = "Failed to decrypt incoming payload: ${e.message}"
-                                    ))
-                                }
-                            }
-                        }
-
-                        val table = json.optString("table", "unknown")
+                    while (!serverSocket.isClosed) {
+                        val clientSocket = serverSocket.accept()
                         serviceScope.launch(Dispatchers.IO) {
-                            repository.insertHubLog(com.example.data.db.HubEventLogEntity(
-                                level = "INFO",
-                                message = "HTTP POST sync request received for local table '$table'."
-                            ))
-                        }
-                        
-                        if (json.has("data")) {
-                            val dataObj = json.get("data")
-                            serviceScope.launch(Dispatchers.IO) {
-                                try {
-                                    if (dataObj is JSONArray) {
-                                        for (i in 0 until dataObj.length()) {
-                                            val rowItem = dataObj.getJSONObject(i)
-                                            val idStr = if (rowItem.has("id")) rowItem.get("id").toString() else UUID.randomUUID().toString()
-                                            
-                                            // Process sensitivities (Hash + images download)
-                                            val hashed = com.example.util.SmsGatewaySecurityAndSyncUtils.hashSensitiveDataInPayload(rowItem.toString())
-                                            val localized = com.example.util.SmsGatewaySecurityAndSyncUtils.downloadAndLocalizeImagesInPayload(applicationContext, hashed, repository)
-                                            
-                                            repository.insertDynamicRow(
-                                                com.example.data.db.DynamicRowEntity(
-                                                    tableName = table,
-                                                    itemId = idStr,
-                                                    payload = localized
-                                                )
-                                            )
-                                        }
-                                        repository.insertHubLog(com.example.data.db.HubEventLogEntity(
-                                            level = "INFO",
-                                            message = "Sync success: Ingested and secured ${dataObj.length()} items into table '$table'."
-                                        ))
-                                    } else if (dataObj is JSONObject) {
-                                        val idStr = if (dataObj.has("id")) dataObj.get("id").toString() else UUID.randomUUID().toString()
-                                        
-                                        // Process sensitivities (Hash + images download)
-                                        val hashed = com.example.util.SmsGatewaySecurityAndSyncUtils.hashSensitiveDataInPayload(dataObj.toString())
-                                        val localized = com.example.util.SmsGatewaySecurityAndSyncUtils.downloadAndLocalizeImagesInPayload(applicationContext, hashed, repository)
-                                        
-                                        repository.insertDynamicRow(
-                                            com.example.data.db.DynamicRowEntity(
-                                                tableName = table,
-                                                itemId = idStr,
-                                                payload = localized
-                                            )
-                                        )
-                                        repository.insertHubLog(com.example.data.db.HubEventLogEntity(
-                                            level = "INFO",
-                                            message = "Sync success: Ingested and secured 1 item into table '$table'."
-                                        ))
-                                    }
-                                } catch (e: Exception) {
-                                    repository.insertHubLog(com.example.data.db.HubEventLogEntity(
-                                        level = "ERROR",
-                                        message = "Failed saving HTTP database posts: ${e.message}"
-                                    ))
-                                }
+                            try {
+                                handleHttpClientConnection(clientSocket)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error handling client connection: ${e.message}")
                             }
                         }
-
-                        responseCode = 200
-                        responseText = "{\"success\":true,\"message\":\"Data synchronized and localized with local Dynamic Table '$table'. Hashed sensitive fields, downloaded media.\"}"
-                    } else if (method == "GET") {
-                        val query = exchange.requestURI.query
-                        val queryMap = if (!query.isNullOrBlank()) {
-                            query.split("&").associate {
-                                val split = it.split("=")
-                                val k = split.getOrNull(0) ?: ""
-                                val v = split.getOrNull(1) ?: ""
-                                k to v
-                            }
-                        } else emptyMap()
-
-                        val table = queryMap["table"] ?: "users"
-                        val itemId = queryMap["id"]
-
-                        responseText = if (itemId != null) {
-                            val row = runBlocking { repository.getDynamicRow(table, itemId) }
-                            if (row != null) {
-                                row.payload
-                            } else {
-                                responseCode = 404
-                                "{\"success\":false,\"error\":\"Item ID $itemId not found in $table table.\"}"
-                            }
-                        } else {
-                            val rows = runBlocking { repository.getDynamicRowsByTableSync(table) }
-                            val arr = JSONArray()
-                            rows.forEach {
-                                arr.put(JSONObject(it.payload))
-                            }
-                            arr.toString()
-                        }
-                    } else {
-                        responseCode = 405
-                        responseText = "Method Not Allowed"
                     }
                 } catch (e: Exception) {
-                    responseCode = 500
-                    responseText = "{\"success\":false,\"error\":\"${e.localizedMessage?.replace("\"", "\\\"")}\"}"
+                    if (!serverSocket.isClosed) {
+                        Log.e(TAG, "Local HTTP server loop error: ${e.message}")
+                    }
                 }
-
-                val bytes = responseText.toByteArray(Charsets.UTF_8)
-                exchange.responseHeaders.set("Content-Type", "application/json")
-                exchange.sendResponseHeaders(responseCode, bytes.size.toLong())
-                exchange.responseBody.use { it.write(bytes) }
             }
-            server.executor = null
-            server.start()
-            localHttpServer = server
+            thread.isDaemon = true
+            thread.start()
+            localHttpServerThread = thread
             Log.i(TAG, "Local stand-alone integration HTTP API Server successfully listening on port 8085")
         } catch (e: Exception) {
             Log.e(TAG, "Unable to boot standalone HTTP server: ${e.message}")
         }
     }
 
+    private suspend fun handleHttpClientConnection(client: java.net.Socket) {
+        client.use { socket ->
+            val reader = socket.getInputStream().bufferedReader(Charsets.UTF_8)
+            val writer = java.io.BufferedOutputStream(socket.getOutputStream())
+            
+            // Read Request Line
+            val requestLine = reader.readLine() ?: return
+            val requestParts = requestLine.split(" ")
+            if (requestParts.size < 2) return
+            
+            val method = requestParts[0].uppercase()
+            val fullUrlPath = requestParts[1]
+            
+            // Read Headers
+            var authHeaderKey = ""
+            var authHeaderToken = ""
+            var contentLength = 0
+            
+            while (true) {
+                val headerLine = reader.readLine() ?: break
+                if (headerLine.isEmpty()) break
+                
+                val colonIdx = headerLine.indexOf(':')
+                if (colonIdx != -1) {
+                    val key = headerLine.substring(0, colonIdx).trim()
+                    val value = headerLine.substring(colonIdx + 1).trim()
+                    if (key.equals("X-Publishable-Key", ignoreCase = true)) {
+                        authHeaderKey = value
+                    } else if (key.equals("X-Secret-Token", ignoreCase = true)) {
+                        authHeaderToken = value
+                    } else if (key.equals("Content-Length", ignoreCase = true)) {
+                        contentLength = value.toIntOrNull() ?: 0
+                    }
+                }
+            }
+            
+            var responseCode = 200
+            var responseText = ""
+            
+            try {
+                val localPk = authManager.getWebsitePublishableKey()
+                val localSk = authManager.getWebsiteSecretToken()
+                
+                if (authHeaderKey != localPk || authHeaderToken != localSk) {
+                    responseCode = 401
+                    responseText = "{\"success\":false,\"error\":\"Unauthorized credentials mapping failed.\"}"
+                } else if (method == "POST") {
+                    val bodyBuilder = java.lang.StringBuilder()
+                    if (contentLength > 0) {
+                        val buffer = CharArray(1024)
+                        var readTotal = 0
+                        while (readTotal < contentLength) {
+                            val toRead = minOf(buffer.size, contentLength - readTotal)
+                            val read = reader.read(buffer, 0, toRead)
+                            if (read == -1) break
+                            bodyBuilder.append(buffer, 0, read)
+                            readTotal += read
+                        }
+                    }
+                    val body = bodyBuilder.toString()
+                    var json = JSONObject(body)
+                    val aesKey = authManager.getWebsiteDecryptionKey()
+                    
+                    if (json.has("encrypted_data")) {
+                        try {
+                            val encStr = json.getString("encrypted_data")
+                            val decStr = com.example.util.AesEncryptionHelper.decrypt(encStr, aesKey)
+                            if (decStr != encStr && decStr.startsWith("{")) {
+                                json = JSONObject(decStr)
+                                repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                    level = "INFO",
+                                    message = "Received encrypted payload. Successfully decrypted using symmetric AES key."
+                                ))
+                            }
+                        } catch (e: Exception) {
+                            repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                level = "ERROR",
+                                message = "Failed to decrypt incoming payload: ${e.message}"
+                            ))
+                        }
+                    }
+                    
+                    val table = json.optString("table", "unknown")
+                    repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                        level = "INFO",
+                        message = "HTTP POST sync request received for local table '$table'."
+                    ))
+                    
+                    if (json.has("data")) {
+                        val dataObj = json.get("data")
+                        try {
+                            if (dataObj is JSONArray) {
+                                for (i in 0 until dataObj.length()) {
+                                    val rowItem = dataObj.getJSONObject(i)
+                                    val idStr = if (rowItem.has("id")) rowItem.get("id").toString() else UUID.randomUUID().toString()
+                                    
+                                    val hashed = com.example.util.SmsGatewaySecurityAndSyncUtils.hashSensitiveDataInPayload(rowItem.toString())
+                                    val localized = com.example.util.SmsGatewaySecurityAndSyncUtils.downloadAndLocalizeImagesInPayload(applicationContext, hashed, repository)
+                                    
+                                    repository.insertDynamicRow(
+                                        com.example.data.db.DynamicRowEntity(
+                                            tableName = table,
+                                            itemId = idStr,
+                                            payload = localized
+                                        )
+                                    )
+                                }
+                                repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                    level = "INFO",
+                                    message = "Sync success: Ingested and secured ${dataObj.length()} items into table '$table'."
+                                ))
+                            } else if (dataObj is JSONObject) {
+                                val idStr = if (dataObj.has("id")) dataObj.get("id").toString() else UUID.randomUUID().toString()
+                                
+                                val hashed = com.example.util.SmsGatewaySecurityAndSyncUtils.hashSensitiveDataInPayload(dataObj.toString())
+                                val localized = com.example.util.SmsGatewaySecurityAndSyncUtils.downloadAndLocalizeImagesInPayload(applicationContext, hashed, repository)
+                                
+                                repository.insertDynamicRow(
+                                    com.example.data.db.DynamicRowEntity(
+                                        tableName = table,
+                                        itemId = idStr,
+                                        payload = localized
+                                    )
+                                )
+                                repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                    level = "INFO",
+                                    message = "Sync success: Ingested and secured 1 item into table '$table'."
+                                ))
+                            }
+                        } catch (e: Exception) {
+                            repository.insertHubLog(com.example.data.db.HubEventLogEntity(
+                                level = "ERROR",
+                                message = "Failed saving HTTP database posts: ${e.message}"
+                            ))
+                        }
+                    }
+                    
+                    responseCode = 200
+                    responseText = "{\"success\":true,\"message\":\"Data synchronized and localized with local Dynamic Table '$table'. Hashed sensitive fields, downloaded media.\"}"
+                } else if (method == "GET") {
+                    val pathUrl = try {
+                        android.net.Uri.parse(fullUrlPath)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    val table = pathUrl?.getQueryParameter("table") ?: "users"
+                    val itemId = pathUrl?.getQueryParameter("id")
+                    
+                    responseText = if (itemId != null) {
+                        val row = repository.getDynamicRow(table, itemId)
+                        if (row != null) {
+                            row.payload
+                        } else {
+                            responseCode = 404
+                            "{\"success\":false,\"error\":\"Item ID $itemId not found in $table table.\"}"
+                        }
+                    } else {
+                        val rows = repository.getDynamicRowsByTableSync(table)
+                        val arr = JSONArray()
+                        rows.forEach {
+                            arr.put(JSONObject(it.payload))
+                        }
+                        arr.toString()
+                    }
+                } else {
+                    responseCode = 405
+                    responseText = "Method Not Allowed"
+                }
+            } catch (e: Exception) {
+                responseCode = 500
+                responseText = "{\"success\":false,\"error\":\"${e.localizedMessage?.replace("\"", "\\\"")}\"}"
+            }
+            
+            val bytes = responseText.toByteArray(Charsets.UTF_8)
+            val statusText = when (responseCode) {
+                200 -> "OK"
+                401 -> "Unauthorized"
+                404 -> "Not Found"
+                405 -> "Method Not Allowed"
+                else -> "Internal Server Error"
+            }
+            val statusLine = "HTTP/1.1 $responseCode $statusText\r\n"
+            val headers = "Content-Type: application/json\r\n" +
+                          "Content-Length: ${bytes.size}\r\n" +
+                          "Connection: close\r\n" +
+                          "\r\n"
+            writer.write(statusLine.toByteArray(Charsets.UTF_8))
+            writer.write(headers.toByteArray(Charsets.UTF_8))
+            writer.write(bytes)
+            writer.flush()
+        }
+    }
+
     private fun stopLocalHttpServer() {
         try {
-            localHttpServer?.stop(0)
-            localHttpServer = null
+            localServerSocket?.close()
+            localServerSocket = null
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping Http Server: ${e.message}")
+            Log.e(TAG, "Error closing localServerSocket: ${e.message}")
+        }
+        try {
+            localHttpServerThread?.interrupt()
+            localHttpServerThread = null
+        } catch (e: Exception) {
+            // Ignore
         }
     }
 

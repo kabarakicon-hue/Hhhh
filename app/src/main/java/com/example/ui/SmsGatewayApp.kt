@@ -4020,6 +4020,7 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
     var isManualExpanded by remember { mutableStateOf(false) }
     var isLogsExpanded by remember { mutableStateOf(false) }
     var showLogsFullScreen by remember { mutableStateOf(false) }
+    var isCompactManualShowMore by remember { mutableStateOf(false) }
     
     // Image selection progress transient animations
     var uploadingStateMsg by remember { mutableStateOf<String?>(null) }
@@ -4475,6 +4476,56 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                         }
                     }
 
+                    // See More / Expandable setup block
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Integration Quick Setup Guidelines",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldPrimary
+                        )
+                        Text(
+                            text = if (isCompactManualShowMore) "See Less ↑" else "See More Details ↓",
+                            fontSize = 10.sp,
+                            color = EmeraldPrimary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { isCompactManualShowMore = !isCompactManualShowMore }
+                                .padding(vertical = 4.dp, horizontal = 8.dp)
+                        )
+                    }
+
+                    if (isCompactManualShowMore) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF070A13), RoundedCornerShape(6.dp))
+                                .border(BorderStroke(0.5.dp, SlateOutline), RoundedCornerShape(6.dp))
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "💡 Quick Integration Directives:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = LightText
+                            )
+                            Text(
+                                text = "• LOCAL SYNC PORT: HTTP POST on Port 8085 (e.g. http://localhost:8085/api/sync or http://<device-ip>:8085/api/sync)\n" +
+                                       "• HEADERS: Include 'X-Publishable-Key' as '$pubKey' and 'X-Secret-Token' as '$secToken' for secure validation handshake.\n" +
+                                       "• SCHEMAS: Post schemas dynamically: {\"table\":\"users\",\"data\":[...]} or objects.\n" +
+                                       "• DATA SECURITY: Sensitivities matching 'phone', 'token', 'password' are automatically secure-hashed with SHA-256 before saving to protect database privacy.",
+                                fontSize = 10.sp,
+                                color = SoftGray,
+                                lineHeight = 13.sp
+                            )
+                        }
+                    }
+
                     Button(
                         onClick = { showDocFullScreen = true },
                         modifier = Modifier.fillMaxWidth().height(32.dp),
@@ -4753,8 +4804,8 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                         Modifier.fillMaxSize().padding(12.dp)
                     } else {
                         Modifier
-                            .fillMaxWidth(0.95f)
-                            .fillMaxHeight(0.9f)
+                            .fillMaxWidth(0.9f)
+                            .fillMaxHeight(0.65f)
                     },
                     colors = CardDefaults.cardColors(containerColor = SlateNavCard),
                     border = BorderStroke(1.dp, SlateOutline),
@@ -4878,7 +4929,7 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
             }
         }
     }
-    }
+}
 
     // CHUNK COMPARTMENT IMAGE COMPRESSION & DETAILS INSPECT DIALOG
     if (selectedRowForInspect != null) {
@@ -5180,8 +5231,8 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                         Modifier.fillMaxSize().padding(12.dp)
                     } else {
                         Modifier
-                            .fillMaxWidth(0.95f)
-                            .fillMaxHeight(0.9f)
+                            .fillMaxWidth(0.9f)
+                            .fillMaxHeight(0.65f)
                     },
                     colors = CardDefaults.cardColors(containerColor = SlateNavCard),
                     border = BorderStroke(1.dp, SlateOutline),
@@ -5443,7 +5494,7 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                 }
             }
         }
-        }
+    }
 
         // FULL-SCREEN LOGS OVERLAY (Terminal Emulator)
         if (showLogsFullScreen) {
@@ -5460,8 +5511,8 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                         Modifier.fillMaxSize().padding(12.dp)
                     } else {
                         Modifier
-                            .fillMaxWidth(0.95f)
-                            .fillMaxHeight(0.85f)
+                            .fillMaxWidth(0.9f)
+                            .fillMaxHeight(0.65f)
                     },
                     colors = CardDefaults.cardColors(containerColor = SlateNavCard),
                     border = BorderStroke(1.dp, SlateOutline),
@@ -5589,7 +5640,7 @@ fun DatabaseSyncSection(viewModel: SmsGatewayViewModel) {
                 }
             }
         }
-        }
+    }
     }
 }
 
